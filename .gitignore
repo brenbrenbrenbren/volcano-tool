@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data files - users should not commit their experimental data
+*.csv
+*.xlsx
+*.xls
+*.tsv
+*.txt
+!requirements.txt
+
+# Output files
+*.png
+*.pdf
+*.html
+output/
+exports/
+
+# Environment variables / secrets
+.env
+.env.local
+*.key
+credentials.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Session files
+*_session_*.json
