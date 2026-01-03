@@ -8,29 +8,49 @@ A comprehensive Streamlit application for visualizing and comparing differential
 
 ## Features
 
-### Data Import
-- **Multi-sheet Excel support**: Load multiple datasets from a single Excel file
-- **Flexible column detection**: Automatically recognizes various column naming conventions (Gene, Gene Symbol, Protein, log2FC, FC, pvalue, padj, FDR, etc.)
-- **Gene ID conversion**: Convert UniProt, Ensembl, or Entrez IDs to gene symbols via MyGene API
-- **FC to log2FC conversion**: Automatically converts linear fold change to log2 scale
+### 🚀 Quick Workflow
+1. **Upload** multiple Excel files (all sheets loaded by default)
+2. **Dashboard** shows overview statistics and gene distribution
+3. **UpSet** identifies overlapping hits across datasets
+4. **Concordance** shows genes regulated in same direction (robust hits!)
+5. **Report** exports top recurring genes
 
-### Visualizations
-- **Volcano Plots**: Interactive plots with customizable thresholds, gene highlighting, and multi-dataset grid view
-- **UpSet Plots**: Visualize overlaps between multiple datasets with gene annotations for small intersections
-- **Heatmaps**: Clustered expression heatmaps with optional Z-score normalization for cross-assay comparison
-- **FC vs FC Scatter**: Pairwise dataset comparison with concordance statistics
+### ⌨️ Keyboard Shortcuts
+- **`/`** - Focus gene search
+- **`Ctrl+D`** - Toggle dark mode
+- **`?`** - Show keyboard shortcuts help
+- **Quick Presets** - One-click threshold adjustment (Stringent/Moderate/Lenient)
+
+### 📊 Key Analysis Tabs
+- **Dashboard**: Overview statistics, gene distribution charts, quick gene lists
+- **Concordance** (NEW!): Identify genes regulated in same direction across datasets
+  - Concordant Up/Down (robust biological hits)
+  - Discordant (potential artifacts or context-dependent)
+  - Downloadable gene lists by concordance type
+- **UpSet Plots**: Visualize overlaps between multiple datasets with hover gene names
+- **Report**: Find genes consistently significant across multiple datasets
+
+### 📁 Data Import
+- **Multi-file Excel support**: Upload multiple Excel files at once
+- **All sheets selected by default**: No manual clicking
+- **Checkbox selection**: Quick toggle with Select All/Clear All buttons
+- **Flexible column detection**: Auto-recognizes Gene, log2FC, FC, pvalue, padj, FDR, etc.
+- **Intensity data processing**: Auto-calculate log2FC + p-values from proteomics data
+- **Gene ID conversion**: UniProt, Ensembl, Entrez → Gene symbols via MyGene API
+- **FC to log2FC conversion**: Automatic transformation
+
+### 📈 Visualizations
+- **Volcano Plots**: Interactive plots with customizable thresholds and multi-dataset grid
+- **Heatmaps**: Clustered expression with optional Z-score normalization
+- **FC vs FC Scatter**: Pairwise dataset comparison with concordance stats
+- **Batch Comparison Matrix**: Pairwise correlation/concordance across all datasets
 - **Gene Bar Plots**: Single gene expression across all datasets
 - **Pathway Analysis**: Visualize pathway gene expression patterns
 
-### Cross-Dataset Analysis
-- **Batch Comparison Matrix**: Pairwise correlation/concordance across all datasets
-- **Top Genes Report**: Find genes consistently significant across multiple datasets
-- **Intersection Explorer**: Quickly identify genes shared across selected datasets
-
-### Export & Session Management
+### 💾 Export & Session
 - **Figure Export**: Download plots as PNG or PDF
-- **Gene List Export**: Copy/download gene lists in comma-separated format
-- **Session Save/Load**: Save analysis state to JSON for later use
+- **Gene List Export**: Copy/download gene lists (comma-separated or newlines)
+- **Session Save/Load**: Save entire analysis state to JSON
 
 ## Installation
 
@@ -109,13 +129,28 @@ volcano_tool/
 
 ## Tips for Effective Use
 
-1. **Comparing different assay types**: Use Z-score normalization in the heatmap when comparing proximity data (smaller FC range) with RNA-seq (larger FC range)
+### Finding Robust Biological Hits
+1. **Start with Concordance Tab**: Genes that are concordant (same direction) across multiple datasets are most likely real biological effects
+2. **Use Dashboard**: Quickly see which genes appear in ALL datasets or 2+ datasets
+3. **Check UpSet Plot**: Visualize exact overlap patterns between datasets
+4. **Validate with Report Tab**: Top recurring genes sorted by frequency
 
-2. **Finding robust hits**: Use the Report tab to find genes significant across multiple datasets - these are more likely to be real biological effects
+### Quick Actions
+- **Press `?`** to see all keyboard shortcuts
+- **Use Quick Presets** (Stringent/Moderate/Lenient) to rapidly adjust thresholds
+- **Click gene lists** in code blocks to select all, then `Ctrl+C` to copy
+- **Press `/`** to jump to gene search
 
-3. **Quick gene lists**: Click on gene lists displayed in `code blocks` to select all, then Ctrl+C to copy
+### Data Analysis Tips
+- **Z-score normalization**: Use in Heatmap when comparing different assay types (e.g., proximity vs RNA-seq)
+- **Concordant genes**: Focus on these for robust, reproducible findings
+- **Discordant genes**: May indicate technical artifacts or context-dependent regulation
+- **Intensity data**: Tool auto-detects proteomics data and calculates log2FC + p-values for you
 
-4. **Dataset management**: Use checkboxes to quickly toggle datasets on/off for analysis
+### Performance Tips
+- Load all sheets at once using **Select All** button
+- Use **threshold presets** instead of manual slider adjustment
+- **Export gene lists** for downstream pathway analysis
 
 ## License
 
