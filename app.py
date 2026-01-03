@@ -1624,9 +1624,11 @@ def batch_comparison_tab(log2fc_threshold: float, pvalue_threshold: float):
             fig.update_layout(
                 title=f"Pairwise {metric.title()} Matrix",
                 paper_bgcolor=paper_bgcolor,
+                plot_bgcolor=paper_bgcolor,
                 font=dict(color=font_color),
                 height=max(400, len(selected_datasets) * 50),
-                xaxis=dict(tickangle=45),
+                xaxis=dict(tickangle=45, color=font_color),
+                yaxis=dict(color=font_color),
             )
 
             st.plotly_chart(fig, use_container_width=True)
@@ -1977,6 +1979,7 @@ def report_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: bool)
                     marker_color=colors,
                     text=display_df['# Datasets'],
                     textposition='outside',
+                    textfont=dict(color=font_color),
                     hovertemplate=(
                         '<b>%{x}</b><br>'
                         'Significant in: %{y} datasets<br>'
@@ -1989,7 +1992,8 @@ def report_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: bool)
                     y=total_datasets,
                     line_dash="dash",
                     line_color="gray",
-                    annotation_text=f"All {total_datasets} datasets"
+                    annotation_text=f"All {total_datasets} datasets",
+                    annotation_font_color=font_color
                 )
 
                 fig.update_layout(
@@ -1999,7 +2003,8 @@ def report_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: bool)
                     paper_bgcolor=paper_bgcolor,
                     plot_bgcolor=plot_bgcolor,
                     font=dict(color=font_color),
-                    xaxis=dict(tickangle=45),
+                    xaxis=dict(tickangle=45, color=font_color, gridcolor='#404040' if st.session_state.dark_mode else '#E0E0E0'),
+                    yaxis=dict(color=font_color, gridcolor='#404040' if st.session_state.dark_mode else '#E0E0E0'),
                     height=500
                 )
 
@@ -2055,8 +2060,8 @@ def report_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: bool)
                     paper_bgcolor=paper_bgcolor,
                     plot_bgcolor=plot_bgcolor,
                     font=dict(color=font_color),
-                    xaxis=dict(tickangle=45),
-                    yaxis=dict(autorange="reversed"),
+                    xaxis=dict(tickangle=45, color=font_color),
+                    yaxis=dict(autorange="reversed", color=font_color),
                     height=max(400, len(genes_to_show) * 20 + 150)
                 )
 
