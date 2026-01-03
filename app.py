@@ -38,7 +38,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Add keyboard shortcut hints via custom CSS
+# Add keyboard shortcuts and custom CSS
 st.markdown("""
 <style>
     /* Improve dark mode visibility */
@@ -78,7 +78,89 @@ st.markdown("""
         grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
         gap: 4px;
     }
+
+    /* Modal styling */
+    .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.7);
+        z-index: 9998;
+        display: none;
+    }
+    .modal-content {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: white;
+        padding: 2rem;
+        border-radius: 8px;
+        z-index: 9999;
+        min-width: 400px;
+    }
 </style>
+
+<script>
+// Keyboard shortcuts handler
+document.addEventListener('keydown', function(e) {
+    // Ignore if user is typing in an input
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+        return;
+    }
+
+    const key = e.key.toLowerCase();
+
+    // Global shortcuts
+    if (key === 'd' && e.ctrlKey) {
+        e.preventDefault();
+        // Toggle dark mode - we'll handle this via session state
+        const darkToggle = document.querySelector('[data-testid="stCheckbox"]');
+        if (darkToggle) darkToggle.click();
+    }
+
+    // Help modal
+    if (key === '?') {
+        e.preventDefault();
+        showHelpModal();
+    }
+
+    // Gene search
+    if (key === '/') {
+        e.preventDefault();
+        focusGeneSearch();
+    }
+});
+
+function showHelpModal() {
+    alert(`Keyboard Shortcuts:
+
+Navigation:
+  1-9    Jump to tab
+
+Tools:
+  /      Gene search
+  Ctrl+D Dark mode toggle
+  ?      Show this help
+
+Tips:
+  - Click gene lists to select all (Ctrl+C to copy)
+  - Use threshold sliders in sidebar for quick filtering`);
+}
+
+function focusGeneSearch() {
+    // Try to find and focus gene search input
+    const geneInputs = Array.from(document.querySelectorAll('input')).filter(
+        input => input.placeholder && input.placeholder.toLowerCase().includes('gene')
+    );
+    if (geneInputs.length > 0) {
+        geneInputs[0].focus();
+        geneInputs[0].scrollIntoView({behavior: 'smooth', block: 'center'});
+    }
+}
+</script>
 """, unsafe_allow_html=True)
 
 # Initialize session state
@@ -350,11 +432,37 @@ def main():
         st.session_state.dark_mode = st.toggle("Dark Mode", value=st.session_state.dark_mode)
 
         st.markdown("### Global Thresholds")
+
+        # Quick preset buttons
+        st.caption("Quick Presets:")
+        preset_col1, preset_col2, preset_col3 = st.columns(3)
+
+        with preset_col1:
+            if st.button("Stringent", use_container_width=True, help="log2FC≥1.5, p≤0.01"):
+                st.session_state.preset_fc = 1.5
+                st.session_state.preset_p = 0.01
+        with preset_col2:
+            if st.button("Moderate", use_container_width=True, help="log2FC≥1.0, p≤0.05"):
+                st.session_state.preset_fc = 1.0
+                st.session_state.preset_p = 0.05
+        with preset_col3:
+            if st.button("Lenient", use_container_width=True, help="log2FC≥0.5, p≤0.1"):
+                st.session_state.preset_fc = 0.5
+                st.session_state.preset_p = 0.1
+
+        st.markdown("---")
+
+        # Initialize preset values if not set
+        if 'preset_fc' not in st.session_state:
+            st.session_state.preset_fc = 1.0
+        if 'preset_p' not in st.session_state:
+            st.session_state.preset_p = 0.05
+
         log2fc_threshold = st.slider(
             "|log2FC| threshold",
             min_value=0.0,
             max_value=5.0,
-            value=1.0,
+            value=st.session_state.preset_fc,
             step=0.1,
             help="Absolute log2 fold change threshold for significance"
         )
@@ -362,7 +470,7 @@ def main():
         pvalue_threshold = st.select_slider(
             "P-value threshold",
             options=[0.001, 0.01, 0.05, 0.1],
-            value=0.05
+            value=st.session_state.preset_p
         )
 
         use_padj = st.checkbox("Use adjusted p-value", value=True)
@@ -416,29 +524,35 @@ def main():
         st.markdown("---")
 
         # Keyboard shortcuts help
-        with st.expander("⌨️ Tips"):
+        with st.expander("⌨️ Keyboard Shortcuts"):
             st.markdown("""
-            **Quick Actions:**
-            - Click gene lists to select all (then Ctrl+C)
-            - Use checkboxes to toggle datasets
-            - `Select All` / `Clear All` for bulk selection
-
             **Navigation:**
-            - Use tabs to switch between views
-            - Sidebar controls apply globally
+            - `1-9` - Jump to specific tab
+
+            **Tools:**
+            - `/` - Focus gene search
+            - `Ctrl+D` - Toggle dark mode
+            - `?` - Show keyboard help
+
+            **Quick Actions:**
+            - Click gene lists to select all (then `Ctrl+C`)
+            - Use preset buttons for quick threshold changes
+            - `Select All` / `Clear All` for bulk sheet selection
             """)
 
-    # Main content tabs
+    # Main content tabs - reordered for optimal workflow
     tabs = st.tabs([
         "📁 Data Import",
-        "🌋 Volcano Plots",
-        "🔗 Overlap (UpSet)",
-        "🗺️ Heatmap",
-        "📊 FC vs FC",
-        "📈 Batch Compare",
-        "🔍 Gene Search",
-        "🛤️ Pathways",
+        "📊 Dashboard",
+        "🔗 UpSet",
+        "🔄 Concordance",
         "📋 Report",
+        "🔍 Gene Search",
+        "🌋 Volcano",
+        "🗺️ Heatmap",
+        "📈 FC vs FC",
+        "🧮 Batch Compare",
+        "🛤️ Pathways",
         "💾 Export"
     ])
 
@@ -446,40 +560,48 @@ def main():
     with tabs[0]:
         data_import_tab(log2fc_threshold, pvalue_threshold)
 
-    # Tab 2: Volcano Plots
+    # Tab 2: Dashboard (NEW) - Overview of all datasets
     with tabs[1]:
-        volcano_tab(log2fc_threshold, pvalue_threshold, use_padj)
+        dashboard_tab(log2fc_threshold, pvalue_threshold, use_padj)
 
-    # Tab 3: UpSet Plot
+    # Tab 3: UpSet - Key overlap visualization
     with tabs[2]:
         upset_tab(log2fc_threshold, pvalue_threshold, use_padj, direction)
 
-    # Tab 4: Heatmap
+    # Tab 4: Concordance (NEW) - Direction consistency
     with tabs[3]:
-        heatmap_tab(log2fc_threshold, pvalue_threshold)
+        concordance_tab(log2fc_threshold, pvalue_threshold, use_padj)
 
-    # Tab 5: FC vs FC Scatter
+    # Tab 5: Report - Top recurring genes
     with tabs[4]:
-        scatter_tab(log2fc_threshold, pvalue_threshold, use_padj)
-
-    # Tab 6: Batch Comparison (NEW)
-    with tabs[5]:
-        batch_comparison_tab(log2fc_threshold, pvalue_threshold)
-
-    # Tab 7: Gene Search
-    with tabs[6]:
-        gene_search_tab(log2fc_threshold, pvalue_threshold, use_padj)
-
-    # Tab 8: Pathway Analysis
-    with tabs[7]:
-        pathway_tab(log2fc_threshold, pvalue_threshold)
-
-    # Tab 9: Report
-    with tabs[8]:
         report_tab(log2fc_threshold, pvalue_threshold, use_padj)
 
-    # Tab 10: Export
+    # Tab 6: Gene Search - Quick lookup
+    with tabs[5]:
+        gene_search_tab(log2fc_threshold, pvalue_threshold, use_padj)
+
+    # Tab 7: Volcano Plots
+    with tabs[6]:
+        volcano_tab(log2fc_threshold, pvalue_threshold, use_padj)
+
+    # Tab 8: Heatmap
+    with tabs[7]:
+        heatmap_tab(log2fc_threshold, pvalue_threshold)
+
+    # Tab 9: FC vs FC Scatter
+    with tabs[8]:
+        scatter_tab(log2fc_threshold, pvalue_threshold, use_padj)
+
+    # Tab 10: Batch Comparison
     with tabs[9]:
+        batch_comparison_tab(log2fc_threshold, pvalue_threshold)
+
+    # Tab 11: Pathway Analysis
+    with tabs[10]:
+        pathway_tab(log2fc_threshold, pvalue_threshold)
+
+    # Tab 12: Export
+    with tabs[11]:
         export_tab(log2fc_threshold, pvalue_threshold)
 
 
@@ -1212,6 +1334,420 @@ def process_intensity_manual(
 
     st.success(f"Analyzed {len(st.session_state.datasets)} datasets")
     st.rerun()
+
+
+def dashboard_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: bool):
+    """Dashboard overview of all datasets and key statistics."""
+    st.header("📊 Dashboard - Dataset Overview")
+
+    if not st.session_state.datasets:
+        st.info("Please load datasets in the Data Import tab first.")
+        return
+
+    datasets = st.session_state.datasets
+    pval_col = 'padj' if use_padj else 'pvalue'
+
+    # Summary metrics
+    st.subheader("Summary Statistics")
+
+    total_datasets = len(datasets)
+    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+
+    # Total genes across all datasets
+    all_genes = set()
+    for df in datasets.values():
+        all_genes.update(df['Gene'].values)
+
+    col_m1.metric("Total Datasets", total_datasets)
+    col_m2.metric("Unique Genes", len(all_genes))
+
+    # Genes in multiple datasets
+    analyzer = DEGAnalyzer(log2fc_threshold, pvalue_threshold, use_padj)
+    deg_sets = analyzer.get_deg_sets(datasets, 'both')
+
+    genes_in_2plus = sum(1 for gene in all_genes if sum(1 for s in deg_sets.values() if gene in s) >= 2)
+    genes_in_all = sum(1 for gene in all_genes if all(gene in s for s in deg_sets.values()))
+
+    col_m3.metric("In 2+ Datasets", genes_in_2plus)
+    col_m4.metric("In All Datasets", genes_in_all)
+
+    st.markdown("---")
+
+    # Per-dataset stats table
+    st.subheader("Per-Dataset Statistics")
+
+    stats_data = []
+    for name, df in datasets.items():
+        sig_mask = (df['log2FC'].abs() >= log2fc_threshold) & (df[pval_col] <= pvalue_threshold)
+        up_mask = (df['log2FC'] >= log2fc_threshold) & (df[pval_col] <= pvalue_threshold)
+        down_mask = (df['log2FC'] <= -log2fc_threshold) & (df[pval_col] <= pvalue_threshold)
+
+        stats_data.append({
+            'Dataset': name,
+            'Total Genes': len(df),
+            'Significant': sig_mask.sum(),
+            'Upregulated': up_mask.sum(),
+            'Downregulated': down_mask.sum(),
+            '% Significant': f"{sig_mask.sum() / len(df) * 100:.1f}%"
+        })
+
+    stats_df = pd.DataFrame(stats_data)
+    st.dataframe(stats_df, use_container_width=True, hide_index=True)
+
+    # Download stats
+    csv = stats_df.to_csv(index=False)
+    st.download_button(
+        "📥 Download Statistics (CSV)",
+        csv,
+        "dataset_statistics.csv",
+        "text/csv"
+    )
+
+    st.markdown("---")
+
+    # Intersection overview
+    st.subheader("Intersection Overview")
+
+    col_viz1, col_viz2 = st.columns(2)
+
+    with col_viz1:
+        # Bar chart: genes appearing in N datasets
+        gene_counts = {}
+        for gene in all_genes:
+            count = sum(1 for s in deg_sets.values() if gene in s)
+            if count > 0:
+                gene_counts[count] = gene_counts.get(count, 0) + 1
+
+        import plotly.graph_objects as go
+
+        if st.session_state.dark_mode:
+            paper_bg = '#1E1E1E'
+            plot_bg = '#2D2D2D'
+            font_color = '#FFFFFF'
+            bar_color = '#4ECDC4'
+        else:
+            paper_bg = '#FFFFFF'
+            plot_bg = '#FAFAFA'
+            font_color = '#2C3E50'
+            bar_color = '#3498DB'
+
+        fig = go.Figure(data=[
+            go.Bar(
+                x=list(gene_counts.keys()),
+                y=list(gene_counts.values()),
+                marker_color=bar_color,
+                text=list(gene_counts.values()),
+                textposition='outside'
+            )
+        ])
+
+        fig.update_layout(
+            title="Gene Distribution Across Datasets",
+            xaxis_title="Number of Datasets",
+            yaxis_title="Number of Genes",
+            paper_bgcolor=paper_bg,
+            plot_bgcolor=plot_bg,
+            font=dict(color=font_color),
+            xaxis=dict(color=font_color, gridcolor='#404040' if st.session_state.dark_mode else '#E0E0E0'),
+            yaxis=dict(color=font_color, gridcolor='#404040' if st.session_state.dark_mode else '#E0E0E0'),
+            height=400
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col_viz2:
+        # Pie chart: up vs down regulation
+        total_up = sum(
+            ((df['log2FC'] >= log2fc_threshold) & (df[pval_col] <= pvalue_threshold)).sum()
+            for df in datasets.values()
+        )
+        total_down = sum(
+            ((df['log2FC'] <= -log2fc_threshold) & (df[pval_col] <= pvalue_threshold)).sum()
+            for df in datasets.values()
+        )
+
+        fig = go.Figure(data=[go.Pie(
+            labels=['Upregulated', 'Downregulated'],
+            values=[total_up, total_down],
+            marker=dict(colors=['#FF6B6B' if st.session_state.dark_mode else '#E74C3C',
+                               '#4ECDC4' if st.session_state.dark_mode else '#3498DB'])
+        )])
+
+        fig.update_layout(
+            title="Overall Regulation Direction",
+            paper_bgcolor=paper_bg,
+            font=dict(color=font_color),
+            height=400
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("---")
+
+    # Quick gene lists
+    st.subheader("Quick Gene Lists")
+
+    if genes_in_all > 0:
+        with st.expander(f"✅ Genes in ALL {total_datasets} datasets ({genes_in_all} genes)"):
+            genes_list = sorted([gene for gene in all_genes if all(gene in s for s in deg_sets.values())])
+            st.code(", ".join(genes_list), language=None)
+            st.download_button(
+                "📋 Download",
+                "\n".join(genes_list),
+                "genes_in_all_datasets.txt",
+                key="dash_all"
+            )
+
+    if genes_in_2plus > 0:
+        with st.expander(f"🔗 Genes in 2+ datasets ({genes_in_2plus} genes)"):
+            genes_list = sorted([gene for gene in all_genes if sum(1 for s in deg_sets.values() if gene in s) >= 2])
+            if len(genes_list) <= 100:
+                st.code(", ".join(genes_list), language=None)
+            else:
+                st.caption(f"Showing first 100 of {len(genes_list)} genes:")
+                st.code(", ".join(genes_list[:100]), language=None)
+            st.download_button(
+                "📋 Download",
+                "\n".join(genes_list),
+                "genes_in_2plus_datasets.txt",
+                key="dash_2plus"
+            )
+
+
+def concordance_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: bool):
+    """Show genes regulated in the same direction across datasets (concordance)."""
+    st.header("🔄 Concordance Analysis")
+
+    if len(st.session_state.datasets) < 2:
+        st.info("Please load at least 2 datasets to analyze concordance.")
+        return
+
+    datasets = st.session_state.datasets
+    pval_col = 'padj' if use_padj else 'pvalue'
+
+    st.markdown("""
+    **Concordance** shows whether genes are regulated in the **same direction** across datasets.
+    - **Concordant**: Same direction (all up or all down)
+    - **Discordant**: Mixed directions (up in some, down in others)
+
+    This helps identify **robust biological hits** vs artifacts.
+    """)
+
+    st.markdown("---")
+
+    # Build concordance matrix
+    analyzer = DEGAnalyzer(log2fc_threshold, pvalue_threshold, use_padj)
+
+    # Get all genes that appear in at least 2 datasets
+    all_genes = set()
+    for df in datasets.values():
+        all_genes.update(df['Gene'].values)
+
+    # Filter to genes in 2+ datasets
+    min_datasets_filter = st.slider(
+        "Minimum datasets gene must appear in",
+        min_value=2,
+        max_value=len(datasets),
+        value=2
+    )
+
+    concordance_data = []
+    for gene in all_genes:
+        fc_values = []
+        sig_in_datasets = []
+
+        for name, df in datasets.items():
+            gene_row = df[df['Gene'] == gene]
+            if len(gene_row) > 0:
+                fc = gene_row.iloc[0]['log2FC']
+                pval = gene_row.iloc[0][pval_col]
+
+                if abs(fc) >= log2fc_threshold and pval <= pvalue_threshold:
+                    fc_values.append(fc)
+                    sig_in_datasets.append(name)
+
+        if len(fc_values) >= min_datasets_filter:
+            # Check concordance
+            all_positive = all(fc > 0 for fc in fc_values)
+            all_negative = all(fc < 0 for fc in fc_values)
+
+            if all_positive:
+                direction = 'Concordant Up'
+                color_code = 1
+            elif all_negative:
+                direction = 'Concordant Down'
+                color_code = -1
+            else:
+                direction = 'Discordant'
+                color_code = 0
+
+            concordance_data.append({
+                'Gene': gene,
+                'Datasets': len(fc_values),
+                'Direction': direction,
+                'Mean_log2FC': np.mean(fc_values),
+                'FC_Values': fc_values,
+                'Datasets_List': sig_in_datasets,
+                'Color': color_code
+            })
+
+    if not concordance_data:
+        st.warning("No genes found in multiple datasets with current thresholds.")
+        return
+
+    concordance_df = pd.DataFrame(concordance_data)
+
+    # Summary metrics
+    st.subheader("Concordance Summary")
+    col1, col2, col3, col4 = st.columns(4)
+
+    n_concordant_up = len(concordance_df[concordance_df['Direction'] == 'Concordant Up'])
+    n_concordant_down = len(concordance_df[concordance_df['Direction'] == 'Concordant Down'])
+    n_discordant = len(concordance_df[concordance_df['Direction'] == 'Discordant'])
+    total = len(concordance_df)
+
+    col1.metric("Total Genes", total)
+    col2.metric("✅ Concordant Up", n_concordant_up, delta=f"{n_concordant_up/total*100:.1f}%")
+    col3.metric("✅ Concordant Down", n_concordant_down, delta=f"{n_concordant_down/total*100:.1f}%")
+    col4.metric("⚠️ Discordant", n_discordant, delta=f"{n_discordant/total*100:.1f}%")
+
+    st.markdown("---")
+
+    # Filter options
+    direction_filter = st.selectbox(
+        "Show genes:",
+        options=['All', 'Concordant Only', 'Concordant Up', 'Concordant Down', 'Discordant Only']
+    )
+
+    if direction_filter == 'Concordant Only':
+        filtered_df = concordance_df[concordance_df['Direction'].str.contains('Concordant')]
+    elif direction_filter == 'Concordant Up':
+        filtered_df = concordance_df[concordance_df['Direction'] == 'Concordant Up']
+    elif direction_filter == 'Concordant Down':
+        filtered_df = concordance_df[concordance_df['Direction'] == 'Concordant Down']
+    elif direction_filter == 'Discordant Only':
+        filtered_df = concordance_df[concordance_df['Direction'] == 'Discordant']
+    else:
+        filtered_df = concordance_df
+
+    # Sort by number of datasets
+    filtered_df = filtered_df.sort_values(['Datasets', 'Mean_log2FC'], ascending=[False, False])
+
+    st.subheader(f"{direction_filter} ({len(filtered_df)} genes)")
+
+    # Heatmap visualization
+    if len(filtered_df) > 0:
+        # Build matrix: genes x datasets
+        max_genes_to_show = st.slider("Max genes to show in heatmap", 10, 200, 50)
+        genes_to_show = filtered_df.head(max_genes_to_show)['Gene'].tolist()
+
+        heatmap_data = []
+        for gene in genes_to_show:
+            row_data = {'Gene': gene}
+            for ds_name in datasets.keys():
+                df = datasets[ds_name]
+                gene_row = df[df['Gene'] == gene]
+                if len(gene_row) > 0:
+                    fc = gene_row.iloc[0]['log2FC']
+                    pval = gene_row.iloc[0][pval_col]
+                    if abs(fc) >= log2fc_threshold and pval <= pvalue_threshold:
+                        row_data[ds_name] = fc
+                    else:
+                        row_data[ds_name] = 0  # Not significant
+                else:
+                    row_data[ds_name] = np.nan
+
+            heatmap_data.append(row_data)
+
+        heatmap_df = pd.DataFrame(heatmap_data).set_index('Gene')
+
+        # Create heatmap
+        import plotly.graph_objects as go
+
+        if st.session_state.dark_mode:
+            colorscale = [[0, '#4ECDC4'], [0.5, '#2D2D2D'], [1, '#FF6B6B']]
+            paper_bg = '#1E1E1E'
+            plot_bg = '#2D2D2D'
+            font_color = '#FFFFFF'
+        else:
+            colorscale = [[0, '#3498DB'], [0.5, '#FFFFFF'], [1, '#E74C3C']]
+            paper_bg = '#FFFFFF'
+            plot_bg = '#FAFAFA'
+            font_color = '#2C3E50'
+
+        max_val = min(5, heatmap_df.abs().max().max()) if not heatmap_df.empty else 2
+
+        fig = go.Figure(data=go.Heatmap(
+            z=heatmap_df.values,
+            x=heatmap_df.columns.tolist(),
+            y=heatmap_df.index.tolist(),
+            colorscale=colorscale,
+            zmin=-max_val,
+            zmax=max_val,
+            colorbar=dict(title=dict(text="log2FC", font=dict(color=font_color))),
+            hovertemplate='<b>%{y}</b><br>%{x}<br>log2FC: %{z:.2f}<extra></extra>'
+        ))
+
+        fig.update_layout(
+            title=f"Concordance Heatmap - {direction_filter}",
+            xaxis_title="Dataset",
+            yaxis_title="Gene",
+            paper_bgcolor=paper_bg,
+            plot_bgcolor=plot_bg,
+            font=dict(color=font_color),
+            xaxis=dict(tickangle=45, color=font_color),
+            yaxis=dict(autorange="reversed", color=font_color),
+            height=max(400, len(genes_to_show) * 20 + 150)
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Gene lists
+        st.markdown("---")
+        st.subheader("Gene Lists")
+
+        # Concordant up
+        conc_up = filtered_df[filtered_df['Direction'] == 'Concordant Up']
+        if len(conc_up) > 0:
+            with st.expander(f"🔺 Concordant Up ({len(conc_up)} genes)"):
+                genes_list = sorted(conc_up['Gene'].tolist())
+                st.code(", ".join(genes_list), language=None)
+                st.download_button(
+                    "📋 Download",
+                    "\n".join(genes_list),
+                    "concordant_up.txt",
+                    key="conc_up"
+                )
+
+        # Concordant down
+        conc_down = filtered_df[filtered_df['Direction'] == 'Concordant Down']
+        if len(conc_down) > 0:
+            with st.expander(f"🔻 Concordant Down ({len(conc_down)} genes)"):
+                genes_list = sorted(conc_down['Gene'].tolist())
+                st.code(", ".join(genes_list), language=None)
+                st.download_button(
+                    "📋 Download",
+                    "\n".join(genes_list),
+                    "concordant_down.txt",
+                    key="conc_down"
+                )
+
+        # Discordant
+        disc = filtered_df[filtered_df['Direction'] == 'Discordant']
+        if len(disc) > 0:
+            with st.expander(f"⚠️ Discordant ({len(disc)} genes)"):
+                genes_list = sorted(disc['Gene'].tolist())
+                if len(genes_list) <= 50:
+                    st.code(", ".join(genes_list), language=None)
+                else:
+                    st.caption(f"Showing first 50 of {len(genes_list)} genes:")
+                    st.code(", ".join(genes_list[:50]), language=None)
+                st.download_button(
+                    "📋 Download",
+                    "\n".join(genes_list),
+                    "discordant.txt",
+                    key="disc"
+                )
 
 
 def volcano_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: bool):
