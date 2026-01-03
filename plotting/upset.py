@@ -71,7 +71,6 @@ def create_upset_plot(
         plot_bg = '#2D2D2D'
         font_color = '#FFFFFF'
         grid_color = '#404040'
-        annotation_color = '#FFD93D'
     else:
         bar_color = '#3498DB'
         dot_color_active = '#2C3E50'
@@ -81,7 +80,6 @@ def create_upset_plot(
         plot_bg = '#FAFAFA'
         font_color = '#2C3E50'
         grid_color = '#E0E0E0'
-        annotation_color = '#E74C3C'
 
     # Create subplots: bar chart on top, dot matrix below
     fig = make_subplots(
@@ -135,28 +133,6 @@ def create_upset_plot(
         ),
         row=1, col=2
     )
-
-    # Add gene name annotations for very small intersections (≤5 genes)
-    for i, (combo, genes) in enumerate(sorted_intersections):
-        if len(genes) <= 5 and len(genes) > 0:
-            gene_list = sorted(list(genes))
-            annotation_text = "<br>".join(gene_list)
-            fig.add_annotation(
-                x=i,
-                y=len(genes),
-                text=annotation_text,
-                showarrow=True,
-                arrowhead=2,
-                arrowsize=1,
-                arrowwidth=1,
-                arrowcolor=annotation_color,
-                ax=0,
-                ay=-40 - (len(genes) * 12),
-                font=dict(size=8, color=annotation_color),
-                align="center",
-                xref="x2",
-                yref="y2"
-            )
 
     # Set sizes (top left - horizontal bar chart)
     set_sizes = [len(deg_sets[name]) for name in dataset_names]

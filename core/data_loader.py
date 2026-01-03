@@ -3,6 +3,7 @@ Data loading module for Excel and CSV files with multiple sheets/datasets.
 """
 
 import pandas as pd
+import numpy as np
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -128,13 +129,13 @@ class DataLoader:
 
     def detect_data_type(self, df: pd.DataFrame) -> str:
         """
-        Detect if DataFrame contains DEG results or raw counts.
+        Detect if DataFrame contains DEG results, raw counts, or intensity data.
 
         Args:
             df: DataFrame to analyze
 
         Returns:
-            'deg_results' or 'raw_counts'
+            'deg_results', 'raw_counts', or 'intensity_data'
         """
         columns_lower = [col.lower().replace(' ', '').replace('_', '').replace('-', '').replace('.', '')
                         for col in df.columns]
@@ -155,13 +156,45 @@ class DataLoader:
         if has_deg_cols >= 2:
             return 'deg_results'
 
-        # Check for count data (mostly integers)
+        # Check numeric columns
         numeric_cols = df.select_dtypes(include=['number']).columns
-        if len(numeric_cols) > 0:
-            sample_data = df[numeric_cols].iloc[:100]
-            is_integer_like = (sample_data == sample_data.round()).all().all()
-            if is_integer_like and sample_data.min().min() >= 0:
-                return 'raw_counts'
+        if len(numeric_cols) == 0:
+            return 'deg_results'  # Default if no numeric data
+
+        sample_data = df[numeric_cols].iloc[:100]
+
+        # Check for integer count data (non-negative integers)
+        is_integer_like = (sample_data == sample_data.round()).all().all()
+        min_val = sample_data.min().min()
+        max_val = sample_data.max().max()
+
+        if is_integer_like and min_val >= 0 and max_val > 100:
+            return 'raw_counts'
+
+        # Check for intensity/proteomics data
+        # Typically has: multiple sample columns with similar names (replicates)
+        # Values can be negative (if log-transformed) or positive (linear)
+        # Usually floats, not integers
+        if len(numeric_cols) >= 3:
+            # Check if column names suggest sample groups
+            from .deseq_runner import detect_sample_groups
+            groups = detect_sample_groups(numeric_cols.tolist())
+
+            # If we detect multiple groups with replicates, it's likely intensity data
+            if len(groups) >= 2:
+                has_replicates = any(len(cols) >= 2 for cols in groups.values())
+                if has_replicates:
+                    return 'intensity_data'
+
+            # Also check if values look like log-transformed data
+            # (typically between -10 and +10 for log2 intensities)
+            flat_values = sample_data.values.flatten()
+            flat_values = flat_values[~np.isnan(flat_values)]
+            if len(flat_values) > 0:
+                pct_5 = np.percentile(flat_values, 5)
+                pct_95 = np.percentile(flat_values, 95)
+                if pct_5 > -15 and pct_95 < 15 and (pct_5 < 0 or not is_integer_like):
+                    return 'intensity_data'
 
         return 'deg_results'  # Default assumption
 
