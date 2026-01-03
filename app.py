@@ -19,7 +19,8 @@ from itertools import combinations
 # Import local modules
 from core import (
     DataLoader, DataPreprocessor, DEGAnalyzer,
-    run_deseq2, run_simple_de, run_intensity_de, detect_sample_groups, auto_run_de
+    run_deseq2, run_simple_de, run_intensity_de, detect_sample_groups, auto_run_de,
+    controller  # Import the new controller
 )
 from plotting import (
     create_volcano_plot, create_multi_volcano,
@@ -912,60 +913,50 @@ def process_all_deg_datasets(
     convert_ids: bool = False, species: str = 'human',
     needs_log_transform: bool = False
 ):
-    """Process DEG datasets from multiple files/sheets."""
-    preprocessor = st.session_state.preprocessor
-    mapper = st.session_state.gene_mapper
-
+    """Process DEG datasets from multiple files/sheets using cached controller."""
     processed = 0
     with st.spinner(f"Processing {len(sheets_list)} dataset(s)..."):
         for filename, sheetname in sheets_list:
-            try:
-                df = get_sheet_data(filename, sheetname)
-                if df is None:
-                    st.warning(f"Could not load {sheetname} from {filename}")
-                    continue
+            df = get_sheet_data(filename, sheetname)
+            if df is None:
+                st.warning(f"Could not load {sheetname} from {filename}")
+                continue
 
-                # Auto-detect columns for this sheet if they differ
-                col_info = st.session_state.loader.get_column_info(df)
+            # Auto-detect columns for this sheet if they differ
+            col_info = st.session_state.loader.get_column_info(df)
 
-                # Use specified columns, or fall back to auto-detected
-                actual_gene_col = gene_col if gene_col in df.columns else col_info.get('gene_col')
-                actual_fc_col = log2fc_col if log2fc_col in df.columns else (col_info.get('log2fc_col') or col_info.get('fc_col'))
-                actual_pval_col = pvalue_col if pvalue_col in df.columns else col_info.get('pvalue_col')
-                actual_padj_col = padj_col if padj_col and padj_col in df.columns else col_info.get('padj_col')
+            # Use specified columns, or fall back to auto-detected
+            actual_gene_col = gene_col if gene_col in df.columns else col_info.get('gene_col')
+            actual_fc_col = log2fc_col if log2fc_col in df.columns else (col_info.get('log2fc_col') or col_info.get('fc_col'))
+            actual_pval_col = pvalue_col if pvalue_col in df.columns else col_info.get('pvalue_col')
+            actual_padj_col = padj_col if padj_col and padj_col in df.columns else col_info.get('padj_col')
 
-                if not actual_gene_col or not actual_fc_col or not actual_pval_col:
-                    st.warning(f"Sheet '{sheetname}' missing required columns. Skipping.")
-                    continue
+            if not actual_gene_col or not actual_fc_col or not actual_pval_col:
+                st.warning(f"Sheet '{sheetname}' missing required columns. Skipping.")
+                continue
 
-                # Check if FC column needs log transform
-                fc_col_lower = actual_fc_col.lower().replace(' ', '').replace('_', '')
-                sheet_needs_log = not any(x in fc_col_lower for x in ['log2', 'log', 'lfc'])
+            # Check if FC column needs log transform
+            fc_col_lower = actual_fc_col.lower().replace(' ', '').replace('_', '')
+            sheet_needs_log = not any(x in fc_col_lower for x in ['log2', 'log', 'lfc'])
 
-                # Convert IDs if requested
-                if convert_ids:
-                    try:
-                        df = mapper.convert_to_symbols(df, actual_gene_col, species)
-                        actual_gene_col = 'Gene_Symbol'
-                    except:
-                        pass
+            # Call cached controller
+            ds_name, result_df, error = controller.process_single_deg_sheet(
+                df, filename, sheetname, 
+                actual_gene_col, actual_fc_col, actual_pval_col, actual_padj_col,
+                convert_ids, species, 
+                needs_log_transform=(sheet_needs_log or needs_log_transform)
+            )
 
-                standardized = preprocessor.standardize_dataset(
-                    df, actual_gene_col, actual_fc_col, actual_pval_col, actual_padj_col,
-                    needs_log_transform=sheet_needs_log or needs_log_transform
-                )
-
-                # Use sheetname as dataset name (add filename prefix if multiple files)
-                if len(st.session_state.uploaded_files_data) > 1:
-                    dataset_name = f"{Path(filename).stem}_{sheetname}"
-                else:
-                    dataset_name = sheetname
-
-                st.session_state.datasets[dataset_name] = standardized
+            if error:
+                st.warning(f"Failed to process {sheetname}: {error}")
+            elif result_df is not None:
+                # Handle single file case naming preference
+                if len(st.session_state.uploaded_files_data) == 1:
+                     # Strip filename prefix if only one file loaded
+                     ds_name = sheetname
+                
+                st.session_state.datasets[ds_name] = result_df
                 processed += 1
-
-            except Exception as e:
-                st.warning(f"Failed to process {sheetname}: {str(e)}")
 
     st.success(f"Successfully processed **{processed}** dataset(s)")
     st.rerun()
@@ -978,65 +969,54 @@ def process_all_intensity_datasets(
     is_log_transformed: bool = True,
     convert_ids: bool = False, species: str = 'human'
 ):
-    """Process intensity data from multiple sheets."""
-    mapper = st.session_state.gene_mapper
+    """Process intensity data from multiple sheets using cached controller."""
     control_cols = detected_groups[control_group]
 
     processed = 0
     with st.spinner(f"Calculating DE for {len(sheets_list)} sheet(s)..."):
         for filename, sheetname in sheets_list:
-            try:
-                df = get_sheet_data(filename, sheetname)
-                if df is None:
+            df = get_sheet_data(filename, sheetname)
+            if df is None:
+                continue
+
+            # Auto-detect gene column if needed
+            if gene_col not in df.columns:
+                col_info = st.session_state.loader.get_column_info(df)
+                actual_gene_col = col_info.get('gene_col')
+                if not actual_gene_col:
+                    st.warning(f"Sheet '{sheetname}' missing gene column. Skipping.")
+                    continue
+            else:
+                actual_gene_col = gene_col
+
+            for treatment in treatment_groups:
+                treatment_cols = detected_groups[treatment]
+
+                # Check columns exist
+                missing = [c for c in control_cols + treatment_cols if c not in df.columns]
+                if missing:
+                    st.warning(f"Sheet '{sheetname}' missing columns: {missing[:3]}...")
                     continue
 
-                # Auto-detect gene column if needed
-                if gene_col not in df.columns:
-                    col_info = st.session_state.loader.get_column_info(df)
-                    actual_gene_col = col_info.get('gene_col')
-                    if not actual_gene_col:
-                        st.warning(f"Sheet '{sheetname}' missing gene column. Skipping.")
-                        continue
-                else:
-                    actual_gene_col = gene_col
+                ds_name, result_df, error = controller.process_intensity_analysis(
+                    df, filename, sheetname,
+                    actual_gene_col, control_cols, treatment_cols,
+                    treatment, control_group,
+                    is_log_transformed, convert_ids, species
+                )
 
-                for treatment in treatment_groups:
-                    treatment_cols = detected_groups[treatment]
-
-                    # Check columns exist
-                    missing = [c for c in control_cols + treatment_cols if c not in df.columns]
-                    if missing:
-                        st.warning(f"Sheet '{sheetname}' missing columns: {missing[:3]}...")
-                        continue
-
-                    result = run_intensity_de(
-                        df, actual_gene_col, control_cols, treatment_cols,
-                        is_log_transformed=is_log_transformed
-                    )
-
-                    if convert_ids:
-                        try:
-                            result = mapper.convert_to_symbols(result, 'Gene', species)
-                            result['Gene'] = result['Gene_Symbol']
-                            result = result.drop(columns=['Gene_Symbol'])
-                        except:
-                            pass
-
-                    # Dataset naming
-                    base_name = sheetname
-                    if len(st.session_state.uploaded_files_data) > 1:
-                        base_name = f"{Path(filename).stem}_{sheetname}"
-
-                    if len(treatment_groups) > 1:
-                        dataset_name = f"{base_name}_{treatment}_vs_{control_group}"
-                    else:
-                        dataset_name = base_name
-
-                    st.session_state.datasets[dataset_name] = result
+                if error:
+                    st.warning(f"Failed to process {sheetname}: {error}")
+                elif result_df is not None:
+                    # Simplify naming if possible
+                    if len(st.session_state.uploaded_files_data) == 1:
+                        # Reconstruct name without filename prefix
+                        ds_name = f"{sheetname}_{treatment}_vs_{control_group}"
+                        if len(treatment_groups) == 1:
+                             ds_name = sheetname
+                    
+                    st.session_state.datasets[ds_name] = result_df
                     processed += 1
-
-            except Exception as e:
-                st.warning(f"Failed to process {sheetname}: {str(e)}")
 
     st.success(f"Generated **{processed}** dataset(s)")
     st.rerun()
@@ -1049,45 +1029,35 @@ def process_all_intensity_manual(
     is_log_transformed: bool = True,
     convert_ids: bool = False, species: str = 'human'
 ):
-    """Process intensity data with manually selected groups."""
-    mapper = st.session_state.gene_mapper
-
+    """Process intensity data with manually selected groups using cached controller."""
     processed = 0
     with st.spinner(f"Processing {len(sheets_list)} sheet(s)..."):
         for filename, sheetname in sheets_list:
-            try:
-                df = get_sheet_data(filename, sheetname)
-                if df is None:
-                    continue
+            df = get_sheet_data(filename, sheetname)
+            if df is None:
+                continue
 
-                col_info = st.session_state.loader.get_column_info(df)
-                actual_gene_col = gene_col if gene_col in df.columns else col_info.get('gene_col')
+            col_info = st.session_state.loader.get_column_info(df)
+            actual_gene_col = gene_col if gene_col in df.columns else col_info.get('gene_col')
 
-                if not actual_gene_col:
-                    continue
+            if not actual_gene_col:
+                continue
 
-                result = run_intensity_de(
-                    df, actual_gene_col, group_a_cols, group_b_cols,
-                    is_log_transformed=is_log_transformed
-                )
+            ds_name, result_df, error = controller.process_intensity_analysis(
+                df, filename, sheetname,
+                actual_gene_col, group_a_cols, group_b_cols,
+                "GroupB", "GroupA", # Generic names for manual selection
+                is_log_transformed, convert_ids, species
+            )
 
-                if convert_ids:
-                    try:
-                        result = mapper.convert_to_symbols(result, 'Gene', species)
-                        result['Gene'] = result['Gene_Symbol']
-                        result = result.drop(columns=['Gene_Symbol'])
-                    except:
-                        pass
-
-                dataset_name = sheetname
-                if len(st.session_state.uploaded_files_data) > 1:
-                    dataset_name = f"{Path(filename).stem}_{sheetname}"
-
-                st.session_state.datasets[dataset_name] = result
+            if error:
+                st.warning(f"Failed: {sheetname}: {error}")
+            elif result_df is not None:
+                if len(st.session_state.uploaded_files_data) == 1:
+                    ds_name = sheetname
+                
+                st.session_state.datasets[ds_name] = result_df
                 processed += 1
-
-            except Exception as e:
-                st.warning(f"Failed: {sheetname}: {e}")
 
     st.success(f"Processed **{processed}** dataset(s)")
     st.rerun()
@@ -1099,45 +1069,34 @@ def process_all_count_datasets(
     group_a: List[str], group_b: List[str],
     convert_ids: bool = False, species: str = 'human'
 ):
-    """Run DE analysis on count data from multiple sheets."""
-    mapper = st.session_state.gene_mapper
-
+    """Run DE analysis on count data from multiple sheets using cached controller."""
     processed = 0
     with st.spinner(f"Running DE for {len(sheets_list)} sheet(s)..."):
         for filename, sheetname in sheets_list:
-            try:
-                df = get_sheet_data(filename, sheetname)
-                if df is None:
-                    continue
+            df = get_sheet_data(filename, sheetname)
+            if df is None:
+                continue
 
-                col_info = st.session_state.loader.get_column_info(df)
-                actual_gene_col = gene_col if gene_col in df.columns else col_info.get('gene_col')
+            col_info = st.session_state.loader.get_column_info(df)
+            actual_gene_col = gene_col if gene_col in df.columns else col_info.get('gene_col')
 
-                if not actual_gene_col:
-                    continue
+            if not actual_gene_col:
+                continue
 
-                try:
-                    result = run_deseq2(df, actual_gene_col, group_a, group_b)
-                except ImportError:
-                    result = run_simple_de(df, actual_gene_col, group_a, group_b)
+            ds_name, result_df, error = controller.process_count_analysis(
+                df, filename, sheetname,
+                actual_gene_col, group_a, group_b,
+                convert_ids, species
+            )
 
-                if convert_ids:
-                    try:
-                        result = mapper.convert_to_symbols(result, 'Gene', species)
-                        result['Gene'] = result['Gene_Symbol']
-                        result = result.drop(columns=['Gene_Symbol'])
-                    except:
-                        pass
-
-                dataset_name = sheetname
-                if len(st.session_state.uploaded_files_data) > 1:
-                    dataset_name = f"{Path(filename).stem}_{sheetname}"
-
-                st.session_state.datasets[dataset_name] = result
+            if error:
+                st.warning(f"Failed: {sheetname}: {error}")
+            elif result_df is not None:
+                if len(st.session_state.uploaded_files_data) == 1:
+                    ds_name = sheetname
+                
+                st.session_state.datasets[ds_name] = result_df
                 processed += 1
-
-            except Exception as e:
-                st.warning(f"Failed: {sheetname}: {e}")
 
     st.success(f"Analyzed **{processed}** dataset(s)")
     st.rerun()
