@@ -105,62 +105,111 @@ st.markdown("""
 </style>
 
 <script>
-// Keyboard shortcuts handler
-document.addEventListener('keydown', function(e) {
+// robust-shortcuts.js
+const doc = window.parent.document;
+const frameDoc = window.document;
+
+function handleKey(e) {
     // Ignore if user is typing in an input
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.contentEditable === 'true') {
         return;
     }
 
     const key = e.key.toLowerCase();
+    
+    // Debug log
+    console.log("Key pressed:", key);
 
-    // Global shortcuts
-    if (key === 'd' && e.ctrlKey) {
-        e.preventDefault();
-        // Toggle dark mode - we'll handle this via session state
-        const darkToggle = document.querySelector('[data-testid="stCheckbox"]');
-        if (darkToggle) darkToggle.click();
+    // Helper to switch tabs
+    function switchTab(index) {
+        // Find all tab buttons in the parent document (Streamlit renders them outside the iframe sometimes)
+        // We look for div[data-baseweb="tab"]
+        let tabs = doc.querySelectorAll('div[data-baseweb="tab"]');
+        
+        // Fallback to local frame if parent query fails
+        if (tabs.length === 0) {
+            tabs = frameDoc.querySelectorAll('div[data-baseweb="tab"]');
+        }
+
+        if (index >= 0 && index < tabs.length) {
+            console.log("Switching to tab", index);
+            tabs[index].click();
+            tabs[index].scrollIntoView({behavior: 'smooth', block: 'center'});
+            
+            // Show toast
+            showToast(`Switched to Tab ${index + 1}`);
+        }
     }
 
-    // Help modal
-    if (key === '?') {
-        e.preventDefault();
-        showHelpModal();
+    // --- NAVIGATION MAPPING ---
+    
+    // Number keys 1-9
+    if (key >= '1' && key <= '9') {
+        switchTab(parseInt(key) - 1);
     }
 
-    // Gene search
+    // Semantic Shortcuts
+    if (key === 'd') switchTab(1); // Dashboard
+    if (key === 'u') switchTab(2); // UpSet
+    if (key === 'c') switchTab(3); // Concordance
+    if (key === 'v') switchTab(6); // Volcano
+
+    // Gene Search (/)
     if (key === '/') {
         e.preventDefault();
-        focusGeneSearch();
+        const inputs = doc.querySelectorAll('input');
+        // Find the gene search box (heuristic: check placeholder)
+        for(let input of inputs) {
+            if(input.placeholder && input.placeholder.toLowerCase().includes('gene')) {
+                input.focus();
+                showToast("Gene Search Focused");
+                break;
+            }
+        }
     }
-});
 
-function showHelpModal() {
-    alert(`Keyboard Shortcuts:
-
-Navigation:
-  1-9    Jump to tab
-
-Tools:
-  /      Gene search
-  Ctrl+D Dark mode toggle
-  ?      Show this help
-
-Tips:
-  - Click gene lists to select all (Ctrl+C to copy)
-  - Use threshold sliders in sidebar for quick filtering`);
-}
-
-function focusGeneSearch() {
-    // Try to find and focus gene search input
-    const geneInputs = Array.from(document.querySelectorAll('input')).filter(
-        input => input.placeholder && input.placeholder.toLowerCase().includes('gene')
-    );
-    if (geneInputs.length > 0) {
-        geneInputs[0].focus();
-        geneInputs[0].scrollIntoView({behavior: 'smooth', block: 'center'});
+    // Help (?)
+    if (key === '?') {
+        e.preventDefault();
+        alert("Shortcuts:\nD: Dashboard\nU: UpSet\nC: Concordance\nV: Volcano\n1-9: Tabs");
     }
 }
+
+// Visual feedback function
+function showToast(text) {
+    // Check if toast container exists, if not create it
+    let toast = doc.getElementById('shortcut-toast');
+    if (!toast) {
+        toast = doc.createElement('div');
+        toast.id = 'shortcut-toast';
+        toast.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            z-index: 99999;
+            font-family: sans-serif;
+            transition: opacity 0.5s;
+        `;
+        doc.body.appendChild(toast);
+    }
+    toast.textContent = text;
+    toast.style.opacity = '1';
+    setTimeout(() => { toast.style.opacity = '0'; }, 2000);
+}
+
+// Remove existing listeners to prevent duplicates (if any)
+doc.removeEventListener('keydown', handleKey);
+frameDoc.removeEventListener('keydown', handleKey);
+
+// Add listeners
+doc.addEventListener('keydown', handleKey);
+frameDoc.addEventListener('keydown', handleKey);
+
+console.log("Global shortcut listener attached!");
 </script>
 """, unsafe_allow_html=True)
 
@@ -183,6 +232,10 @@ if 'dark_mode' not in st.session_state:
     st.session_state.dark_mode = False
 if 'id_type_detected' not in st.session_state:
     st.session_state.id_type_detected = None
+if 'search_history' not in st.session_state:
+    st.session_state.search_history = []  # Track recent searches
+if 'gene_index' not in st.session_state:
+    st.session_state.gene_index = {}  # Fast gene lookup index
 
 
 # =============================================================================
@@ -528,11 +581,15 @@ def main():
         with st.expander("⌨️ Keyboard Shortcuts"):
             st.markdown("""
             **Navigation:**
+            - `d` - Dashboard (Home)
+            - `u` - UpSet (Overlap Analysis)
+            - `c` - Concordance
+            - `v` - Volcano Plot
             - `1-9` - Jump to specific tab
 
             **Tools:**
             - `/` - Focus gene search
-            - `Ctrl+D` - Toggle dark mode
+            - `Ctrl+L` - Toggle dark mode
             - `?` - Show keyboard help
 
             **Quick Actions:**
@@ -1329,6 +1386,32 @@ def dashboard_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: bo
 
     col_m3.metric("In 2+ Datasets", genes_in_2plus)
     col_m4.metric("In All Datasets", genes_in_all)
+
+    st.markdown("---")
+
+    # High-Value Targets (Recurring Genes)
+    st.subheader("🏆 Top Recurring Targets (High Priority)")
+    st.caption("Genes that are significant across multiple datasets - best candidates for phenotypes.")
+    
+    top_recurring = find_top_recurring_genes(
+        datasets, 
+        log2fc_threshold, 
+        pvalue_threshold, 
+        use_padj, 
+        min_datasets=2, 
+        top_n=20
+    )
+    
+    if not top_recurring.empty:
+        # Style the dataframe for better readability
+        st.dataframe(
+            top_recurring.style.background_gradient(subset=['Mean_log2FC'], cmap='RdBu_r', vmin=-2, vmax=2)
+            .format({'Mean_log2FC': '{:.2f}', 'Min_pvalue': '{:.2e}'}),
+            use_container_width=True,
+            hide_index=True
+        )
+    else:
+        st.info("No genes found significant in 2+ datasets. Try lowering thresholds or loading more data.")
 
     st.markdown("---")
 
@@ -2151,51 +2234,367 @@ def batch_comparison_tab(log2fc_threshold: float, pvalue_threshold: float):
             st.warning("Please select at least 2 datasets.")
 
 
+# =============================================================================
+# PERFORMANCE OPTIMIZATION FUNCTIONS
+# =============================================================================
+
+def build_gene_index(datasets: Dict[str, pd.DataFrame]) -> Dict[str, Dict[str, int]]:
+    """
+    Build an index mapping gene names to dataset locations for O(1) lookup.
+
+    This dramatically speeds up gene searches by avoiding repeated dataframe scans.
+
+    Args:
+        datasets: Dictionary of dataset name to DataFrame
+
+    Returns:
+        Dictionary mapping gene_name_upper -> {dataset_name: row_index}
+    """
+    gene_index = {}
+
+    for dataset_name, df in datasets.items():
+        if 'Gene' in df.columns:
+            for idx, gene in enumerate(df['Gene'].values):
+                if pd.notna(gene):
+                    gene_upper = str(gene).upper()
+                    if gene_upper not in gene_index:
+                        gene_index[gene_upper] = {}
+                    gene_index[gene_upper][dataset_name] = idx
+
+    return gene_index
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def get_gene_presence_cached(
+    datasets_hash: str,
+    gene_name: str,
+    log2fc_threshold: float,
+    pvalue_threshold: float,
+    use_padj: bool
+) -> pd.DataFrame:
+    """
+    Cached version of gene presence lookup using gene index for speed.
+
+    The datasets_hash parameter ensures cache invalidation when data changes.
+    Uses session state gene_index for O(1) lookups instead of O(n) scans.
+    """
+    gene_upper = gene_name.upper()
+    gene_index = st.session_state.gene_index
+    datasets = st.session_state.datasets
+
+    results = []
+
+    for name, df in datasets.items():
+        # Use index for O(1) lookup instead of scanning
+        if gene_upper in gene_index and name in gene_index[gene_upper]:
+            row_idx = gene_index[gene_upper][name]
+            row = df.iloc[row_idx]
+
+            log2fc = row['log2FC']
+            pval = row.get('padj' if use_padj else 'pvalue', row.get('pvalue', 1.0))
+            is_sig = abs(log2fc) >= log2fc_threshold and pval <= pvalue_threshold
+
+            results.append({
+                'Dataset': name,
+                'Gene': row['Gene'],
+                'log2FC': log2fc,
+                'pvalue': row.get('pvalue', np.nan),
+                'padj': row.get('padj', np.nan),
+                'Significant': is_sig
+            })
+        else:
+            # Gene not found in this dataset
+            results.append({
+                'Dataset': name,
+                'Gene': gene_name,
+                'log2FC': np.nan,
+                'pvalue': np.nan,
+                'padj': np.nan,
+                'Significant': False
+            })
+
+    return pd.DataFrame(results)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def create_gene_barplot_cached(
+    datasets_hash: str,
+    gene_name: str,
+    log2fc_threshold: float,
+    pvalue_threshold: float,
+    use_padj: bool,
+    dark_mode: bool
+):
+    """
+    Cached version of barplot generation.
+
+    Caching prevents re-rendering the same plot multiple times.
+    The datasets_hash parameter ensures cache invalidation when data changes.
+    """
+    return create_gene_barplot(
+        st.session_state.datasets,
+        gene_name,
+        log2fc_threshold=log2fc_threshold,
+        pvalue_threshold=pvalue_threshold,
+        use_padj=use_padj,
+        dark_mode=dark_mode
+    )
+
+
+def fuzzy_match_genes(query: str, gene_list: List[str], threshold: int = 80) -> List[tuple]:
+    """
+    Find genes similar to query using fuzzy string matching.
+
+    Uses difflib for fast fuzzy matching without external dependencies.
+    Returns genes sorted by similarity score.
+
+    Args:
+        query: Search query
+        gene_list: List of available genes
+        threshold: Minimum similarity score (0-100)
+
+    Returns:
+        List of (gene_name, score) tuples sorted by score descending
+    """
+    from difflib import SequenceMatcher
+
+    query_upper = query.upper()
+    matches = []
+
+    for gene in gene_list:
+        gene_upper = gene.upper()
+
+        # Quick exact/starts-with check first (faster)
+        if gene_upper == query_upper:
+            matches.append((gene, 100))
+        elif gene_upper.startswith(query_upper):
+            matches.append((gene, 95))
+        else:
+            # Fuzzy match using SequenceMatcher
+            ratio = SequenceMatcher(None, query_upper, gene_upper).ratio() * 100
+            if ratio >= threshold:
+                matches.append((gene, int(ratio)))
+
+    # Sort by score descending
+    matches.sort(key=lambda x: x[1], reverse=True)
+    return matches
+
+
+def add_to_search_history(gene_name: str, max_history: int = 10):
+    """
+    Add gene to search history, maintaining a fixed size.
+
+    Most recent searches appear first.
+    """
+    # Remove if already exists (to move to front)
+    if gene_name in st.session_state.search_history:
+        st.session_state.search_history.remove(gene_name)
+
+    # Add to front
+    st.session_state.search_history.insert(0, gene_name)
+
+    # Trim to max size
+    if len(st.session_state.search_history) > max_history:
+        st.session_state.search_history = st.session_state.search_history[:max_history]
+
+
+def get_datasets_hash() -> str:
+    """
+    Generate a hash of current datasets for cache invalidation.
+
+    This ensures cached data is invalidated when datasets change.
+    """
+    dataset_info = {
+        name: (len(df), tuple(df.columns))
+        for name, df in st.session_state.datasets.items()
+    }
+    return str(hash(str(dataset_info)))
+
+
+# =============================================================================
+# TAB FUNCTIONS
+# =============================================================================
+
 def gene_search_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: bool):
-    """Single gene search tab with export."""
+    """Optimized gene search tab with autocomplete, fuzzy matching, and caching."""
     st.header("Gene Search")
 
     if not st.session_state.datasets:
         st.info("Please load datasets in the Data Import tab first.")
         return
 
+    # Build gene index if not exists or datasets changed
+    current_hash = get_datasets_hash()
+    if not st.session_state.gene_index or getattr(st.session_state, '_last_datasets_hash', None) != current_hash:
+        with st.spinner("Indexing genes for fast lookup..."):
+            st.session_state.gene_index = build_gene_index(st.session_state.datasets)
+            st.session_state._last_datasets_hash = current_hash
+
+    # Get all unique genes from index (much faster than scanning dataframes)
+    all_genes = sorted(list(st.session_state.gene_index.keys()))
+
     col1, col2 = st.columns([3, 1])
 
     with col2:
         st.subheader("Search")
 
-        gene_name = st.text_input(
-            "Enter gene name",
-            placeholder="e.g., CTNNB1"
+        # Search mode toggle
+        search_mode = st.radio(
+            "Search mode",
+            options=["Exact match", "Contains", "Fuzzy match"],
+            horizontal=False,
+            help="Exact: Find exact gene name\nContains: Find genes containing text\nFuzzy: Tolerate typos/misspellings"
+        )
+
+        # Text input for typing
+        search_query = st.text_input(
+            "Type to search genes",
+            placeholder="e.g., BCKD, ANXA2, IL17RC",
+            key="gene_search_input",
+            help="Start typing to see matching genes"
         ).strip()
 
-        if gene_name:
-            # Quick info
-            analyzer = DEGAnalyzer(log2fc_threshold, pvalue_threshold, use_padj)
-            presence = analyzer.get_gene_presence(st.session_state.datasets, gene_name)
+        # Show search history if no active search
+        if not search_query and st.session_state.search_history:
+            st.markdown("**📌 Recent searches:**")
+            history_cols = st.columns(2)
+            for idx, hist_gene in enumerate(st.session_state.search_history[:6]):
+                with history_cols[idx % 2]:
+                    if st.button(f"🔎 {hist_gene}", key=f"hist_{idx}", use_container_width=True):
+                        # Trigger search by setting the gene directly
+                        search_query = hist_gene
 
-            sig_count = presence['Significant'].sum()
-            st.metric("Significant in", f"{sig_count}/{len(st.session_state.datasets)} datasets")
+        # Filter genes based on search mode and query
+        filtered_genes = []
+        fuzzy_suggestions = []
+
+        if search_query:
+            query_upper = search_query.upper()
+
+            if search_mode == "Exact match":
+                # Exact match
+                if query_upper in all_genes:
+                    filtered_genes = [query_upper]
+                else:
+                    # No exact match found - suggest fuzzy matches
+                    fuzzy_suggestions = fuzzy_match_genes(search_query, all_genes, threshold=70)
+
+            elif search_mode == "Contains":
+                # Contains mode - filter genes containing the search term
+                filtered_genes = [g for g in all_genes if query_upper in g]
+
+            elif search_mode == "Fuzzy match":
+                # Fuzzy matching for typo tolerance
+                fuzzy_matches = fuzzy_match_genes(search_query, all_genes, threshold=60)
+                filtered_genes = [gene for gene, score in fuzzy_matches]
+
+            # Show autocomplete suggestions
+            if filtered_genes:
+                st.markdown(f"**{len(filtered_genes)} matching gene(s)**")
+
+                # Limit display for performance
+                display_genes = filtered_genes[:100]
+                if len(filtered_genes) > 100:
+                    st.caption(f"Showing top 100 of {len(filtered_genes)} matches")
+
+                selected_genes = st.multiselect(
+                    "Select genes to visualize",
+                    options=display_genes,
+                    default=[display_genes[0]] if search_mode == "Exact match" else [],
+                    help="Select one or more genes to compare"
+                )
+            elif fuzzy_suggestions:
+                # Show fuzzy suggestions when exact match fails
+                st.warning(f"No exact match for '{search_query}'. Did you mean:")
+                suggested_genes = [gene for gene, score in fuzzy_suggestions[:5]]
+                for gene, score in fuzzy_suggestions[:5]:
+                    st.caption(f"• {gene} ({score}% match)")
+
+                selected_genes = st.multiselect(
+                    "Select from suggestions",
+                    options=suggested_genes,
+                    help="Select one or more genes to compare"
+                )
+            else:
+                st.error(f"No genes found matching '{search_query}'")
+                selected_genes = []
+        else:
+            # No search query - show suggestions
+            st.info("💡 **Quick tips:**\n- Type gene name to autocomplete\n- Use 'Fuzzy match' for typo tolerance\n- Recent searches shown above")
+
+            # Show top significant genes as suggestions (cached computation)
+            top_genes = []
+            for df in st.session_state.datasets.values():
+                if 'Gene' in df.columns:
+                    sig_genes = df[
+                        (abs(df['log2FC']) >= log2fc_threshold) &
+                        (df.get('padj' if use_padj else 'pvalue', pd.Series([1.0])) <= pvalue_threshold)
+                    ]['Gene'].tolist()
+                    top_genes.extend(sig_genes)
+
+            if top_genes:
+                from collections import Counter
+                most_common = Counter(top_genes).most_common(10)
+                st.markdown("**🔥 Top significant genes:**")
+                for gene, count in most_common[:6]:
+                    st.caption(f"• {gene} ({count} datasets)")
+
+            selected_genes = []
+
+        # Add selected genes to search history
+        for gene in selected_genes:
+            add_to_search_history(gene)
+
+        # Show quick metrics for selected genes (using cached function)
+        if selected_genes:
+            datasets_hash = get_datasets_hash()
+            for gene in selected_genes:
+                presence = get_gene_presence_cached(
+                    datasets_hash, gene, log2fc_threshold, pvalue_threshold, use_padj
+                )
+                sig_count = presence['Significant'].sum()
+                st.metric(
+                    f"{gene}",
+                    f"{sig_count}/{len(st.session_state.datasets)}",
+                    help=f"Significant in {sig_count} of {len(st.session_state.datasets)} datasets"
+                )
 
     with col1:
-        if gene_name:
-            fig = create_gene_barplot(
-                st.session_state.datasets,
-                gene_name,
-                log2fc_threshold=log2fc_threshold,
-                pvalue_threshold=pvalue_threshold,
-                use_padj=use_padj,
-                dark_mode=st.session_state.dark_mode
-            )
+        if selected_genes:
+            datasets_hash = get_datasets_hash()
 
-            st.plotly_chart(fig, use_container_width=True)
-            get_figure_download_buttons(fig, f"gene_{gene_name}", "gene")
+            # Process each selected gene (using cached functions)
+            for gene_name in selected_genes:
+                st.markdown(f"### {gene_name}")
 
-            # Detail table
-            st.markdown("### Detailed Values")
-            st.dataframe(presence, use_container_width=True)
+                # Use cached barplot generation
+                fig = create_gene_barplot_cached(
+                    datasets_hash,
+                    gene_name,
+                    log2fc_threshold=log2fc_threshold,
+                    pvalue_threshold=pvalue_threshold,
+                    use_padj=use_padj,
+                    dark_mode=st.session_state.dark_mode
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+                get_figure_download_buttons(fig, f"gene_{gene_name}", "gene")
+
+                # Detail table (using cached function)
+                presence = get_gene_presence_cached(
+                    datasets_hash, gene_name, log2fc_threshold, pvalue_threshold, use_padj
+                )
+
+                with st.expander(f"📊 Detailed values for {gene_name}"):
+                    st.dataframe(presence, use_container_width=True)
+
+                st.divider()
         else:
-            st.info("Enter a gene name to search across all datasets.")
+            st.info("🔍 Start typing a gene name to search and visualize results across all datasets.\n\n"
+                   "**Search modes:**\n"
+                   "- **Exact match**: Find exact gene name (e.g., 'ANXA2' finds only ANXA2)\n"
+                   "- **Contains**: Find genes containing text (e.g., 'BCKD' finds BCKDHA, BCKDHB, BCKDK)\n"
+                   "- **Fuzzy match**: Tolerate typos (e.g., 'ANAX2' suggests ANXA2)")
 
 
 def pathway_tab(log2fc_threshold: float, pvalue_threshold: float):
