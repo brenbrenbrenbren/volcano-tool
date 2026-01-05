@@ -102,6 +102,71 @@ st.markdown("""
         z-index: 9999;
         min-width: 400px;
     }
+
+    /* Command Palette */
+    .command-palette-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 99998;
+        display: none;
+    }
+    .command-palette-modal {
+        position: fixed;
+        top: 20%;
+        left: 50%;
+        transform: translateX(-50%);
+        background: white;
+        border-radius: 12px;
+        z-index: 99999;
+        width: 500px;
+        max-width: 90vw;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        display: none;
+        max-height: 60vh;
+        overflow: hidden;
+    }
+    .command-palette-input {
+        width: 100%;
+        padding: 16px;
+        font-size: 18px;
+        border: none;
+        border-bottom: 1px solid #eee;
+        border-radius: 12px 12px 0 0;
+        outline: none;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+    .command-list {
+        max-height: 400px;
+        overflow-y: auto;
+    }
+    .command-item {
+        padding: 12px 16px;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        transition: background 0.1s ease;
+    }
+    .command-item:hover,
+    .command-item.selected {
+        background: #f5f5f5;
+    }
+    .command-name {
+        font-size: 14px;
+        color: #333;
+    }
+    .command-key {
+        font-size: 12px;
+        color: #888;
+        padding: 2px 6px;
+        background: #eee;
+        border-radius: 4px;
+        font-family: monospace;
+    }
 </style>
 
 <script>
@@ -201,6 +266,158 @@ function showToast(text) {
     setTimeout(() => { toast.style.opacity = '0'; }, 2000);
 }
 
+// Command Palette
+let commandPaletteOpen = false;
+let selectedCommandIndex = 0;
+let filteredCommands = [];
+
+const commands = [
+    { name: 'Go to Dashboard', key: 'D', action: () => switchTab(1) },
+    { name: 'Go to UpSet', key: 'U', action: () => switchTab(2) },
+    { name: 'Go to Concordance', key: 'C', action: () => switchTab(3) },
+    { name: 'Go to Gene Search', key: '/', action: () => switchTab(5) },
+    { name: 'Go to Volcano', key: 'V', action: () => switchTab(6) },
+    { name: 'Go to Heatmap', key: null, action: () => switchTab(7) },
+    { name: 'Go to FC vs FC', key: null, action: () => switchTab(8) },
+    { name: 'Go to Export', key: null, action: () => switchTab(11) },
+    { name: 'Clear gene highlights', key: null, action: () => { showToast('Highlights cleared'); } },
+    { name: 'Toggle dark mode', key: 'Ctrl+L', action: () => { showToast('Dark mode toggled'); } },
+];
+
+function createCommandPalette() {
+    let overlay = doc.getElementById('cmd-overlay');
+    if (!overlay) {
+        overlay = doc.createElement('div');
+        overlay.id = 'cmd-overlay';
+        overlay.className = 'command-palette-overlay';
+        overlay.onclick = closeCommandPalette;
+        doc.body.appendChild(overlay);
+    }
+
+    let modal = doc.getElementById('cmd-modal');
+    if (!modal) {
+        modal = doc.createElement('div');
+        modal.id = 'cmd-modal';
+        modal.className = 'command-palette-modal';
+        modal.innerHTML = `
+            <input type="text" class="command-palette-input"
+                   placeholder="Type a command..." id="cmd-input">
+            <div class="command-list" id="cmd-list"></div>
+        `;
+        doc.body.appendChild(modal);
+
+        const input = modal.querySelector('#cmd-input');
+        input.addEventListener('input', filterCommandPalette);
+        input.addEventListener('keydown', handleCommandInput);
+    }
+
+    return { overlay, modal };
+}
+
+function openCommandPalette() {
+    const { overlay, modal } = createCommandPalette();
+    overlay.style.display = 'block';
+    modal.style.display = 'block';
+    const input = modal.querySelector('#cmd-input');
+    input.focus();
+    input.value = '';
+    selectedCommandIndex = 0;
+    filteredCommands = commands;
+    renderCommands();
+    commandPaletteOpen = true;
+}
+
+function closeCommandPalette() {
+    const overlay = doc.getElementById('cmd-overlay');
+    const modal = doc.getElementById('cmd-modal');
+    if (overlay) overlay.style.display = 'none';
+    if (modal) modal.style.display = 'none';
+    commandPaletteOpen = false;
+}
+
+function renderCommands() {
+    const list = doc.getElementById('cmd-list');
+    if (!list) return;
+
+    list.innerHTML = filteredCommands.map((cmd, i) => `
+        <div class="command-item ${i === selectedCommandIndex ? 'selected' : ''}"
+             data-index="${i}">
+            <span class="command-name">${cmd.name}</span>
+            ${cmd.key ? `<span class="command-key">${cmd.key}</span>` : ''}
+        </div>
+    `).join('');
+
+    list.querySelectorAll('.command-item').forEach(item => {
+        item.onclick = () => executeCommand(parseInt(item.dataset.index));
+    });
+}
+
+function filterCommandPalette(e) {
+    const query = e.target.value.toLowerCase();
+    filteredCommands = commands.filter(c => c.name.toLowerCase().includes(query));
+    selectedCommandIndex = 0;
+    renderCommands();
+}
+
+function handleCommandInput(e) {
+    const list = doc.getElementById('cmd-list');
+    if (!list) return;
+
+    const items = list.querySelectorAll('.command-item');
+
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        selectedCommandIndex = Math.min(selectedCommandIndex + 1, items.length - 1);
+        renderCommands();
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        selectedCommandIndex = Math.max(selectedCommandIndex - 1, 0);
+        renderCommands();
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        executeCommand(selectedCommandIndex);
+    } else if (e.key === 'Escape') {
+        e.preventDefault();
+        closeCommandPalette();
+    }
+}
+
+function executeCommand(index) {
+    if (index < 0 || index >= filteredCommands.length) return;
+
+    const cmd = filteredCommands[index];
+    closeCommandPalette();
+    cmd.action();
+    showToast(cmd.name);
+}
+
+// Update handleKey to include Ctrl+K
+const originalHandleKey = handleKey;
+handleKey = function(e) {
+    // Ctrl+K or Cmd+K for command palette
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        if (commandPaletteOpen) {
+            closeCommandPalette();
+        } else {
+            openCommandPalette();
+        }
+        return;
+    }
+
+    // Escape to close command palette
+    if (e.key === 'Escape' && commandPaletteOpen) {
+        e.preventDefault();
+        closeCommandPalette();
+        return;
+    }
+
+    // Call original handler
+    if (!commandPaletteOpen) {
+        originalHandleKey(e);
+    }
+};
+
 // Remove existing listeners to prevent duplicates (if any)
 doc.removeEventListener('keydown', handleKey);
 frameDoc.removeEventListener('keydown', handleKey);
@@ -210,6 +427,7 @@ doc.addEventListener('keydown', handleKey);
 frameDoc.addEventListener('keydown', handleKey);
 
 console.log("Global shortcut listener attached!");
+console.log("Command palette ready! Press Ctrl+K to open.");
 </script>
 """, unsafe_allow_html=True)
 
@@ -236,6 +454,11 @@ if 'search_history' not in st.session_state:
     st.session_state.search_history = []  # Track recent searches
 if 'gene_index' not in st.session_state:
     st.session_state.gene_index = {}  # Fast gene lookup index
+if 'priority_genes' not in st.session_state:
+    # Tier 1 targets from research (editable watchlist)
+    st.session_state.priority_genes = ['ANXA2', 'LARP4', 'CMTM4', 'AIFM2', 'MTHFD1L']
+if 'global_highlighted_genes' not in st.session_state:
+    st.session_state.global_highlighted_genes = []  # Cross-tab gene highlighting
 
 
 # =============================================================================
@@ -271,6 +494,71 @@ def get_figure_download_buttons(fig, filename_base: str, key_suffix: str = ""):
             )
         except Exception as e:
             st.caption(f"PDF export requires kaleido: `pip install kaleido`")
+
+
+def copy_button_with_toast(gene_list: List[str], button_label: str = "Copy", key: str = "copy"):
+    """
+    Create a copy button that copies gene list to clipboard with toast notification.
+
+    Args:
+        gene_list: List of gene names to copy
+        button_label: Label for the button
+        key: Unique key for the component
+    """
+    if not gene_list:
+        return
+
+    # Format genes for display and copy
+    genes_newline = "\\n".join(gene_list)
+    count = len(gene_list)
+
+    # Create button
+    if st.button(f"📋 {button_label} ({count})", key=key, type="secondary"):
+        # JavaScript to copy to clipboard and show toast
+        st.components.v1.html(f"""
+        <script>
+            (function() {{
+                const text = `{genes_newline}`;
+
+                // Copy to clipboard
+                navigator.clipboard.writeText(text).then(function() {{
+                    // Create or update toast
+                    let toast = window.parent.document.getElementById('copy-toast');
+                    if (!toast) {{
+                        toast = window.parent.document.createElement('div');
+                        toast.id = 'copy-toast';
+                        toast.style.cssText = `
+                            position: fixed;
+                            bottom: 20px;
+                            right: 20px;
+                            background: #28a745;
+                            color: white;
+                            padding: 12px 24px;
+                            border-radius: 6px;
+                            z-index: 999999;
+                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                            font-size: 14px;
+                            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                            transition: opacity 0.3s ease;
+                            opacity: 0;
+                        `;
+                        window.parent.document.body.appendChild(toast);
+                    }}
+
+                    // Show toast with message
+                    toast.textContent = '✓ {count} genes copied to clipboard!';
+                    toast.style.opacity = '1';
+
+                    // Fade out after 2 seconds
+                    setTimeout(function() {{
+                        toast.style.opacity = '0';
+                    }}, 2000);
+                }}).catch(function(err) {{
+                    console.error('Failed to copy: ', err);
+                }});
+            }})();
+        </script>
+        """, height=0)
 
 
 def save_session() -> bytes:
@@ -577,6 +865,83 @@ def main():
 
         st.markdown("---")
 
+        # Priority Gene Watchlist
+        st.markdown("### ⭐ Priority Watchlist")
+
+        # Add/remove genes from watchlist
+        with st.expander("✏️ Edit Watchlist", expanded=False):
+            new_gene = st.text_input("Add gene", key="watchlist_add", placeholder="e.g., MTHFD1L")
+            col_add, col_clear = st.columns([1, 1])
+            with col_add:
+                if st.button("➕ Add", use_container_width=True) and new_gene:
+                    gene_upper = new_gene.strip().upper()
+                    if gene_upper not in st.session_state.priority_genes:
+                        st.session_state.priority_genes.append(gene_upper)
+                        st.rerun()
+            with col_clear:
+                if st.button("🗑️ Reset to Tier 1", use_container_width=True):
+                    st.session_state.priority_genes = ['ANXA2', 'LARP4', 'CMTM4', 'AIFM2', 'MTHFD1L']
+                    st.rerun()
+
+            # Remove buttons for each gene
+            st.caption("Click gene name to remove:")
+            for gene in st.session_state.priority_genes:
+                if st.button(f"❌ {gene}", key=f"rm_{gene}", use_container_width=True):
+                    st.session_state.priority_genes.remove(gene)
+                    st.rerun()
+
+        # Live status display
+        if st.session_state.datasets and st.session_state.gene_index:
+            for gene in st.session_state.priority_genes:
+                gene_upper = gene.upper()
+                sig_count = 0
+                total_count = 0
+
+                # Use gene_index for O(1) lookup
+                if gene_upper in st.session_state.gene_index:
+                    for dataset_name, row_idx in st.session_state.gene_index[gene_upper].items():
+                        df = st.session_state.datasets[dataset_name]
+                        row = df.iloc[row_idx]
+                        total_count += 1
+
+                        # Check significance
+                        pval = row.get('padj' if use_padj else 'pvalue', 1.0)
+                        if abs(row['log2FC']) >= log2fc_threshold and pval <= pvalue_threshold:
+                            sig_count += 1
+
+                # Color-coded status
+                if total_count == 0:
+                    status_emoji = "⚫"  # Not found in any dataset
+                elif sig_count == 0:
+                    status_emoji = "⚪"  # Found but not significant
+                elif sig_count >= total_count * 0.75:
+                    status_emoji = "🔴"  # Highly significant (75%+ datasets)
+                elif sig_count >= total_count * 0.5:
+                    status_emoji = "🟡"  # Moderately significant (50-75%)
+                else:
+                    status_emoji = "🟢"  # Some significance (<50%)
+
+                # Clickable gene that jumps to Gene Search tab
+                if st.button(
+                    f"{status_emoji} **{gene}** ({sig_count}/{total_count})",
+                    key=f"watch_{gene}",
+                    use_container_width=True,
+                    help=f"Click to search {gene} in Gene Search tab"
+                ):
+                    # Set gene for search and navigate to Gene Search tab (tab index 5)
+                    st.session_state.global_selected_gene = gene
+                    st.session_state.global_highlighted_genes = [gene]
+                    # Note: Tab switching will be handled by user clicking tab
+                    # We'll add a message to guide them
+                    st.info(f"🔍 Navigate to **Gene Search** tab to view {gene}")
+
+        else:
+            # No data loaded yet
+            for gene in st.session_state.priority_genes:
+                st.caption(f"⚫ {gene} (no data)")
+
+        st.markdown("---")
+
         # Keyboard shortcuts help
         with st.expander("⌨️ Keyboard Shortcuts"):
             st.markdown("""
@@ -597,6 +962,88 @@ def main():
             - Use preset buttons for quick threshold changes
             - `Select All` / `Clear All` for bulk sheet selection
             """)
+
+    # Floating Stats Banner - Zero-click information
+    if st.session_state.datasets:
+        # Calculate metrics using gene_index for performance
+        total_datasets = len(st.session_state.datasets)
+        total_sig_genes = set()
+        priority_status = {}
+
+        for name, df in st.session_state.datasets.items():
+            # Get significant genes
+            sig_mask = (df['log2FC'].abs() >= log2fc_threshold) & (
+                df.get('padj' if use_padj else 'pvalue', pd.Series([1.0])) <= pvalue_threshold
+            )
+            sig_genes = df[sig_mask]['Gene'].str.upper().tolist()
+            total_sig_genes.update(sig_genes)
+
+            # Check priority genes
+            for pg in st.session_state.priority_genes:
+                if pg not in priority_status:
+                    priority_status[pg] = {'sig': 0, 'total': 0}
+                if pg in st.session_state.gene_index:
+                    if name in st.session_state.gene_index[pg]:
+                        priority_status[pg]['total'] += 1
+                        if pg in [g.upper() for g in sig_genes]:
+                            priority_status[pg]['sig'] += 1
+
+        # Render banner in columns
+        banner_cols = st.columns([1, 1, 1, 2])
+
+        with banner_cols[0]:
+            st.metric("📊 Datasets", total_datasets)
+
+        with banner_cols[1]:
+            st.metric("🔥 Sig Genes", f"{len(total_sig_genes):,}")
+
+        with banner_cols[2]:
+            # Priority genes that are significant in at least one dataset
+            priority_hits = sum(1 for pg, status in priority_status.items() if status['sig'] > 0)
+            total_priority = len(st.session_state.priority_genes)
+            st.metric("⭐ Priority Hits", f"{priority_hits}/{total_priority}")
+
+        with banner_cols[3]:
+            # Priority gene quick status (top 5)
+            priority_chips = []
+            for pg in st.session_state.priority_genes[:5]:
+                status = priority_status.get(pg, {'sig': 0, 'total': 0})
+                if status['total'] > 0:
+                    # Color code based on significance
+                    if status['sig'] >= status['total'] * 0.75:
+                        emoji = "🔴"
+                    elif status['sig'] >= status['total'] * 0.5:
+                        emoji = "🟡"
+                    elif status['sig'] > 0:
+                        emoji = "🟢"
+                    else:
+                        emoji = "⚪"
+                    priority_chips.append(f"{emoji} {pg} ({status['sig']}/{status['total']})")
+                else:
+                    priority_chips.append(f"⚫ {pg}")
+
+            if priority_chips:
+                st.caption(" | ".join(priority_chips))
+            else:
+                st.caption("Add genes to watchlist to track them here")
+
+        st.markdown("---")
+
+    # Global Gene Highlighting Info Bar
+    if st.session_state.global_highlighted_genes:
+        col_info, col_clear = st.columns([4, 1])
+        with col_info:
+            highlighted = st.session_state.global_highlighted_genes
+            if len(highlighted) <= 5:
+                gene_list = ", ".join(highlighted)
+            else:
+                gene_list = ", ".join(highlighted[:5]) + f"... (+{len(highlighted)-5} more)"
+            st.info(f"🎯 **Highlighting:** {gene_list}")
+        with col_clear:
+            if st.button("✖ Clear", key="clear_global_highlight", use_container_width=True):
+                st.session_state.global_highlighted_genes = []
+                st.session_state.global_selected_gene = None
+                st.rerun()
 
     # Main content tabs - reordered for optimal workflow
     tabs = st.tabs([
@@ -1533,12 +1980,16 @@ def dashboard_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: bo
         with st.expander(f"✅ Genes in ALL {total_datasets} datasets ({genes_in_all} genes)"):
             genes_list = sorted([gene for gene in all_genes if all(gene in s for s in deg_sets.values())])
             st.code(", ".join(genes_list), language=None)
-            st.download_button(
-                "📋 Download",
-                "\n".join(genes_list),
-                "genes_in_all_datasets.txt",
-                key="dash_all"
-            )
+            col_dl, col_copy = st.columns([1, 1])
+            with col_dl:
+                st.download_button(
+                    "📥 Download",
+                    "\n".join(genes_list),
+                    "genes_in_all_datasets.txt",
+                    key="dash_all"
+                )
+            with col_copy:
+                copy_button_with_toast(genes_list, "Copy All", key="copy_dash_all")
 
     if genes_in_2plus > 0:
         with st.expander(f"🔗 Genes in 2+ datasets ({genes_in_2plus} genes)"):
@@ -1548,12 +1999,16 @@ def dashboard_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: bo
             else:
                 st.caption(f"Showing first 100 of {len(genes_list)} genes:")
                 st.code(", ".join(genes_list[:100]), language=None)
-            st.download_button(
-                "📋 Download",
-                "\n".join(genes_list),
-                "genes_in_2plus_datasets.txt",
-                key="dash_2plus"
-            )
+            col_dl, col_copy = st.columns([1, 1])
+            with col_dl:
+                st.download_button(
+                    "📥 Download",
+                    "\n".join(genes_list),
+                    "genes_in_2plus_datasets.txt",
+                    key="dash_2plus"
+                )
+            with col_copy:
+                copy_button_with_toast(genes_list, "Copy All", key="copy_dash_2plus")
 
 
 def concordance_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: bool):
@@ -1754,12 +2209,16 @@ def concordance_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: 
             with st.expander(f"🔺 Concordant Up ({len(conc_up)} genes)"):
                 genes_list = sorted(conc_up['Gene'].tolist())
                 st.code(", ".join(genes_list), language=None)
-                st.download_button(
-                    "📋 Download",
-                    "\n".join(genes_list),
-                    "concordant_up.txt",
-                    key="conc_up"
-                )
+                col_dl, col_copy = st.columns([1, 1])
+                with col_dl:
+                    st.download_button(
+                        "📥 Download",
+                        "\n".join(genes_list),
+                        "concordant_up.txt",
+                        key="conc_up"
+                    )
+                with col_copy:
+                    copy_button_with_toast(genes_list, "Copy", key="copy_conc_up")
 
         # Concordant down
         conc_down = filtered_df[filtered_df['Direction'] == 'Concordant Down']
@@ -1767,12 +2226,16 @@ def concordance_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: 
             with st.expander(f"🔻 Concordant Down ({len(conc_down)} genes)"):
                 genes_list = sorted(conc_down['Gene'].tolist())
                 st.code(", ".join(genes_list), language=None)
-                st.download_button(
-                    "📋 Download",
-                    "\n".join(genes_list),
-                    "concordant_down.txt",
-                    key="conc_down"
-                )
+                col_dl, col_copy = st.columns([1, 1])
+                with col_dl:
+                    st.download_button(
+                        "📥 Download",
+                        "\n".join(genes_list),
+                        "concordant_down.txt",
+                        key="conc_down"
+                    )
+                with col_copy:
+                    copy_button_with_toast(genes_list, "Copy", key="copy_conc_down")
 
         # Discordant
         disc = filtered_df[filtered_df['Direction'] == 'Discordant']
@@ -1784,12 +2247,16 @@ def concordance_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: 
                 else:
                     st.caption(f"Showing first 50 of {len(genes_list)} genes:")
                     st.code(", ".join(genes_list[:50]), language=None)
-                st.download_button(
-                    "📋 Download",
-                    "\n".join(genes_list),
-                    "discordant.txt",
-                    key="disc"
-                )
+                col_dl, col_copy = st.columns([1, 1])
+                with col_dl:
+                    st.download_button(
+                        "📥 Download",
+                        "\n".join(genes_list),
+                        "discordant.txt",
+                        key="disc"
+                    )
+                with col_copy:
+                    copy_button_with_toast(genes_list, "Copy All", key="copy_disc")
 
 
 def volcano_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: bool):
@@ -1823,13 +2290,18 @@ def volcano_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: bool
         if selected_dataset:
             df = st.session_state.datasets[selected_dataset]
 
+            # Combine user-inputted highlights with global highlights
+            combined_highlights = list(set(
+                (highlight_genes or []) + st.session_state.global_highlighted_genes
+            ))
+
             fig = create_volcano_plot(
                 df,
                 title=selected_dataset,
                 log2fc_threshold=log2fc_threshold,
                 pvalue_threshold=pvalue_threshold,
                 use_padj=use_padj,
-                highlight_genes=highlight_genes if highlight_genes else None,
+                highlight_genes=combined_highlights if combined_highlights else None,
                 dark_mode=st.session_state.dark_mode,
                 show_labels=show_labels,
                 top_n_labels=top_n
@@ -1935,18 +2407,19 @@ def upset_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: bool, 
                 else:
                     st.write(", ".join(genes_list[:20]) + f"... (+{len(genes_list)-20} more)")
 
-                # Copy button
-                col_copy, col_download = st.columns(2)
-                with col_copy:
-                    st.code(", ".join(genes_list), language=None)
-                with col_download:
+                # Display and actions
+                st.code(", ".join(genes_list), language=None)
+                col_dl, col_copy = st.columns([1, 1])
+                with col_dl:
                     st.download_button(
-                        "📋 Download Gene List",
+                        "📥 Download",
                         "\n".join(genes_list),
                         f"genes_in_all_{len(selected_datasets)}_datasets.txt",
                         "text/plain",
                         key="download_all_genes"
                     )
+                with col_copy:
+                    copy_button_with_toast(genes_list, "Copy All", key="copy_upset_all")
             else:
                 st.info("No genes significant in all selected datasets")
 
@@ -1955,10 +2428,11 @@ def upset_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: bool, 
             if small_intersections:
                 st.markdown("---")
                 st.subheader("Small Intersections (≤10 genes)")
-                for inter in small_intersections[:5]:
+                for idx, inter in enumerate(small_intersections[:5]):
                     with st.expander(f"**{inter['count']} genes** in {len(inter['datasets'])} datasets: {', '.join(inter['datasets'][:3])}{'...' if len(inter['datasets']) > 3 else ''}"):
                         st.write(", ".join(inter['genes']))
                         st.code(", ".join(inter['genes']), language=None)
+                        copy_button_with_toast(inter['genes'], "Copy", key=f"copy_upset_small_{idx}")
 
             # Intersection explorer
             st.markdown("---")
@@ -1978,13 +2452,17 @@ def upset_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: bool, 
                 if genes:
                     genes_sorted = sorted(list(genes))
                     st.code(", ".join(genes_sorted), language=None)
-                    st.download_button(
-                        "📋 Download",
-                        "\n".join(genes_sorted),
-                        "intersection_genes.txt",
-                        "text/plain",
-                        key="download_custom_intersection"
-                    )
+                    col_dl, col_copy = st.columns([1, 1])
+                    with col_dl:
+                        st.download_button(
+                            "📥 Download",
+                            "\n".join(genes_sorted),
+                            "intersection_genes.txt",
+                            "text/plain",
+                            key="download_custom_intersection"
+                        )
+                    with col_copy:
+                        copy_button_with_toast(genes_sorted, "Copy", key="copy_upset_custom")
         else:
             st.warning("Please select at least 2 datasets")
 
@@ -2095,6 +2573,11 @@ def scatter_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: bool
 
     with col1:
         if dataset_a != dataset_b:
+            # Combine user-inputted highlights with global highlights
+            combined_highlights = list(set(
+                (highlight_genes or []) + st.session_state.global_highlighted_genes
+            ))
+
             fig = create_fc_scatter(
                 st.session_state.datasets,
                 dataset_a,
@@ -2102,7 +2585,7 @@ def scatter_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: bool
                 log2fc_threshold=log2fc_threshold,
                 pvalue_threshold=pvalue_threshold,
                 use_padj=use_padj,
-                highlight_genes=highlight_genes if highlight_genes else None,
+                highlight_genes=combined_highlights if combined_highlights else None,
                 show_diagonal=show_diagonal,
                 dark_mode=st.session_state.dark_mode
             )
