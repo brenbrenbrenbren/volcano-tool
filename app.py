@@ -30,6 +30,9 @@ from plotting import (
     create_gene_barplot, create_pathway_barplot
 )
 from utils import GeneMapper, PathwayDatabase, Exporter
+from utils.gene_info import GeneInfoFetcher
+from utils.gene_relationships import GeneRelationshipAnalyzer
+from utils.publication_export import PublicationExporter
 
 # Page config
 st.set_page_config(
@@ -459,6 +462,10 @@ if 'priority_genes' not in st.session_state:
     st.session_state.priority_genes = ['ANXA2', 'LARP4', 'CMTM4', 'AIFM2', 'MTHFD1L']
 if 'global_highlighted_genes' not in st.session_state:
     st.session_state.global_highlighted_genes = []  # Cross-tab gene highlighting
+if 'gene_info_fetcher' not in st.session_state:
+    st.session_state.gene_info_fetcher = GeneInfoFetcher()  # Gene context tooltips
+if 'pub_exporter' not in st.session_state:
+    st.session_state.pub_exporter = PublicationExporter()  # Publication export
 
 
 # =============================================================================
@@ -3063,6 +3070,70 @@ def gene_search_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: 
                 st.plotly_chart(fig, use_container_width=True)
                 get_figure_download_buttons(fig, f"gene_{gene_name}", "gene")
 
+                # Gene Context Information
+                gene_info = st.session_state.gene_info_fetcher.get_gene_info(gene_name)
+                if gene_info:
+                    with st.expander(f"ℹ️ Gene Context: {gene_name}"):
+                        col_info1, col_info2 = st.columns([2, 1])
+
+                        with col_info1:
+                            st.markdown(f"**{gene_info['symbol']}** - {gene_info['name']}")
+
+                            if gene_info['go_terms']:
+                                st.markdown(f"**Function:** {gene_info['go_terms'][0][:150]}")
+
+                            if gene_info['pathways']:
+                                st.markdown("**Pathways:**")
+                                for pathway in gene_info['pathways'][:3]:
+                                    st.caption(f"• {pathway}")
+
+                        with col_info2:
+                            st.markdown("**External Links:**")
+                            if gene_info.get('uniprot'):
+                                st.markdown(f"[UniProt](https://www.uniprot.org/uniprot/{gene_info['uniprot']})")
+                            st.markdown(f"[GeneCards](https://www.genecards.org/cgi-bin/carddisp.pl?gene={gene_name})")
+                            st.markdown(f"[PubMed](https://pubmed.ncbi.nlm.nih.gov/?term={gene_name})")
+
+                # Gene Relationship Hints
+                if len(st.session_state.datasets) >= 3:
+                    with st.expander(f"🔗 Related Genes for {gene_name}"):
+                        analyzer = GeneRelationshipAnalyzer(st.session_state.datasets)
+
+                        # Find correlated genes
+                        correlated = analyzer.find_correlated_genes(
+                            gene_name,
+                            min_datasets=min(3, len(st.session_state.datasets)),
+                            min_correlation=0.7
+                        )
+
+                        if correlated:
+                            st.markdown(f"**Genes showing similar expression patterns:**")
+                            st.caption("(These genes might share regulatory mechanisms with " + gene_name + ")")
+
+                            # Show top 5
+                            for rel in correlated[:5]:
+                                direction_icon = "↗️" if rel['direction'] == 'same' else "↘️"
+                                st.markdown(
+                                    f"{direction_icon} **{rel['gene']}** - "
+                                    f"correlation: {rel['correlation']:.2f} "
+                                    f"({rel['n_datasets']} datasets, p={rel['pvalue']:.3f})"
+                                )
+
+                                # Quick context
+                                context = st.session_state.gene_info_fetcher.get_quick_context(rel['gene'])
+                                if context and context != rel['gene']:
+                                    st.caption(f"   {context}")
+
+                            # Hypothesis suggestion
+                            if len(correlated) > 0:
+                                st.info(
+                                    f"💭 **Hypothesis:** {gene_name} and {correlated[0]['gene']} "
+                                    f"show {'co-regulation' if correlated[0]['direction'] == 'same' else 'opposing regulation'}. "
+                                    f"They might be part of the same pathway or regulatory network."
+                                )
+                        else:
+                            st.caption(f"No strongly correlated genes found for {gene_name}")
+
                 # Detail table (using cached function)
                 presence = get_gene_presence_cached(
                     datasets_hash, gene_name, log2fc_threshold, pvalue_threshold, use_padj
@@ -3620,6 +3691,173 @@ def export_tab(log2fc_threshold: float, pvalue_threshold: float):
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
             )
+
+    # Publication-Ready Export
+    st.markdown("---")
+    st.subheader("📄 Publication-Ready Export")
+    st.caption("Create multi-panel figures with legends for publication")
+
+    with st.expander("🎨 Create Publication Figure", expanded=False):
+        st.markdown("**Select plots to include:**")
+
+        # Panel selection
+        include_volcano = st.checkbox("Include Volcano Plot", value=True)
+        include_heatmap = st.checkbox("Include Heatmap", value=True)
+        include_upset = st.checkbox("Include UpSet Plot", value=False)
+        include_barplot = st.checkbox("Include Top Genes Barplot", value=True)
+
+        # Layout selection
+        layout_option = st.selectbox(
+            "Figure layout",
+            options=["2x2 (4 panels)", "1x3 (3 panels)", "3x1 (3 panels)", "1x2 (2 panels)"],
+            index=0
+        )
+        layout = layout_option.split()[0]  # Extract "2x2" from "2x2 (4 panels)"
+
+        # Dataset selection for volcano plot
+        selected_for_volcano = None
+        if include_volcano:
+            selected_for_volcano = st.selectbox(
+                "Dataset for volcano plot",
+                options=list(st.session_state.datasets.keys()),
+                key="pub_volcano_dataset"
+            )
+
+        # Gene list for barplot
+        selected_genes_for_bar = None
+        if include_barplot:
+            # Get top significant genes
+            all_sig_genes = set()
+            for df in st.session_state.datasets.values():
+                sig_genes = df[
+                    (df['log2FC'].abs() >= log2fc_threshold) &
+                    (df.get('padj', df.get('pvalue', pd.Series([1.0]))) <= pvalue_threshold)
+                ]['Gene'].tolist()
+                all_sig_genes.update(sig_genes[:10])  # Top 10 from each
+
+            selected_genes_for_bar = list(all_sig_genes)[:10]
+
+        # Generate button
+        if st.button("🎨 Generate Publication Figure", use_container_width=True):
+            panels = []
+
+            # Add selected panels
+            if include_volcano and selected_for_volcano:
+                try:
+                    df_volcano = st.session_state.datasets[selected_for_volcano]
+                    fig_volcano = create_volcano_plot(
+                        df_volcano,
+                        title=selected_for_volcano,
+                        log2fc_threshold=log2fc_threshold,
+                        pvalue_threshold=pvalue_threshold,
+                        use_padj=True,
+                        dark_mode=False,  # Always use light mode for publication
+                        show_labels=True,
+                        top_n_labels=10
+                    )
+                    panels.append({
+                        'figure': fig_volcano,
+                        'title': f'Volcano Plot - {selected_for_volcano}',
+                        'label': chr(65 + len(panels)),  # A, B, C...
+                        'panel_description': f'Volcano plot showing differentially expressed genes in {selected_for_volcano}.'
+                    })
+                except Exception as e:
+                    st.warning(f"Could not generate volcano plot: {str(e)}")
+
+            if include_barplot and selected_genes_for_bar:
+                try:
+                    # Create a simple barplot for top genes
+                    # This is a simplified version - you might want to use create_gene_barplot
+                    fig_bar = go.Figure()
+                    for gene in selected_genes_for_bar[:5]:  # Top 5 for clarity
+                        gene_upper = gene.upper()
+                        fc_values = []
+                        dataset_names = []
+                        for ds_name, df in st.session_state.datasets.items():
+                            gene_data = df[df['Gene'].str.upper() == gene_upper]
+                            if len(gene_data) > 0:
+                                fc_values.append(gene_data.iloc[0]['log2FC'])
+                                dataset_names.append(ds_name)
+
+                        if fc_values:
+                            fig_bar.add_trace(go.Bar(
+                                name=gene,
+                                x=dataset_names,
+                                y=fc_values
+                            ))
+
+                    fig_bar.update_layout(
+                        title="Top Differentially Expressed Genes",
+                        xaxis_title="Dataset",
+                        yaxis_title="log2(Fold Change)",
+                        barmode='group',
+                        template='plotly_white'
+                    )
+
+                    panels.append({
+                        'figure': fig_bar,
+                        'title': 'Top DEGs',
+                        'label': chr(65 + len(panels)),
+                        'panel_description': 'Expression patterns of top differentially expressed genes across datasets.'
+                    })
+                except Exception as e:
+                    st.warning(f"Could not generate barplot: {str(e)}")
+
+            # Generate multi-panel figure
+            if panels:
+                try:
+                    pub_exporter = st.session_state.pub_exporter
+                    package = pub_exporter.create_figure_package(
+                        panels=panels,
+                        figure_number=1,
+                        layout=layout,
+                        title="Differential Gene Expression Analysis"
+                    )
+
+                    # Display preview
+                    st.plotly_chart(package['figure'], use_container_width=True)
+
+                    # Display legend
+                    st.markdown("### Figure Legend")
+                    st.text_area("Legend text (copy for your manuscript):", value=package['legend'], height=200)
+
+                    # Export buttons
+                    col_pub1, col_pub2 = st.columns(2)
+
+                    with col_pub1:
+                        # PDF export
+                        try:
+                            pdf_bytes = package['figure'].to_image(format="pdf", width=1200, height=1000, scale=2)
+                            st.download_button(
+                                "📥 Download Figure (PDF)",
+                                data=pdf_bytes,
+                                file_name=f"publication_figure_{datetime.now().strftime('%Y%m%d')}.pdf",
+                                mime="application/pdf",
+                                use_container_width=True
+                            )
+                        except Exception as e:
+                            st.caption("PDF export requires kaleido: `pip install kaleido`")
+
+                    with col_pub2:
+                        # PNG export
+                        try:
+                            png_bytes = package['figure'].to_image(format="png", width=1200, height=1000, scale=2)
+                            st.download_button(
+                                "📥 Download Figure (PNG)",
+                                data=png_bytes,
+                                file_name=f"publication_figure_{datetime.now().strftime('%Y%m%d')}.png",
+                                mime="image/png",
+                                use_container_width=True
+                            )
+                        except Exception as e:
+                            st.caption("PNG export requires kaleido: `pip install kaleido`")
+
+                    st.success("✅ Publication figure generated successfully!")
+
+                except Exception as e:
+                    st.error(f"Error generating publication figure: {str(e)}")
+            else:
+                st.warning("Please select at least one panel to include.")
 
 
 if __name__ == "__main__":
