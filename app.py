@@ -171,268 +171,10 @@ st.markdown("""
         font-family: monospace;
     }
 </style>
-
-<script>
-// robust-shortcuts.js
-const doc = window.parent.document;
-const frameDoc = window.document;
-
-function handleKey(e) {
-    // Ignore if user is typing in an input
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.contentEditable === 'true') {
-        return;
-    }
-
-    const key = e.key.toLowerCase();
-    
-    // Debug log
-    console.log("Key pressed:", key);
-
-    // Helper to switch tabs
-    function switchTab(index) {
-        // Find all tab buttons in the parent document (Streamlit renders them outside the iframe sometimes)
-        // We look for div[data-baseweb="tab"]
-        let tabs = doc.querySelectorAll('div[data-baseweb="tab"]');
-        
-        // Fallback to local frame if parent query fails
-        if (tabs.length === 0) {
-            tabs = frameDoc.querySelectorAll('div[data-baseweb="tab"]');
-        }
-
-        if (index >= 0 && index < tabs.length) {
-            console.log("Switching to tab", index);
-            tabs[index].click();
-            tabs[index].scrollIntoView({behavior: 'smooth', block: 'center'});
-            
-            // Show toast
-            showToast(`Switched to Tab ${index + 1}`);
-        }
-    }
-
-    // --- NAVIGATION MAPPING ---
-    
-    // Number keys 1-9
-    if (key >= '1' && key <= '9') {
-        switchTab(parseInt(key) - 1);
-    }
-
-    // Semantic Shortcuts
-    if (key === 'd') switchTab(1); // Dashboard
-    if (key === 'u') switchTab(2); // UpSet
-    if (key === 'c') switchTab(3); // Concordance
-    if (key === 'v') switchTab(6); // Volcano
-
-    // Gene Search (/)
-    if (key === '/') {
-        e.preventDefault();
-        const inputs = doc.querySelectorAll('input');
-        // Find the gene search box (heuristic: check placeholder)
-        for(let input of inputs) {
-            if(input.placeholder && input.placeholder.toLowerCase().includes('gene')) {
-                input.focus();
-                showToast("Gene Search Focused");
-                break;
-            }
-        }
-    }
-
-    // Help (?)
-    if (key === '?') {
-        e.preventDefault();
-        alert("Shortcuts:\nD: Dashboard\nU: UpSet\nC: Concordance\nV: Volcano\n1-9: Tabs");
-    }
-}
-
-// Visual feedback function
-function showToast(text) {
-    // Check if toast container exists, if not create it
-    let toast = doc.getElementById('shortcut-toast');
-    if (!toast) {
-        toast = doc.createElement('div');
-        toast.id = 'shortcut-toast';
-        toast.style.cssText = `
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background: rgba(0,0,0,0.8);
-            color: white;
-            padding: 10px 20px;
-            border-radius: 5px;
-            z-index: 99999;
-            font-family: sans-serif;
-            transition: opacity 0.5s;
-        `;
-        doc.body.appendChild(toast);
-    }
-    toast.textContent = text;
-    toast.style.opacity = '1';
-    setTimeout(() => { toast.style.opacity = '0'; }, 2000);
-}
-
-// Command Palette
-let commandPaletteOpen = false;
-let selectedCommandIndex = 0;
-let filteredCommands = [];
-
-const commands = [
-    { name: 'Go to Dashboard', key: 'D', action: () => switchTab(1) },
-    { name: 'Go to UpSet', key: 'U', action: () => switchTab(2) },
-    { name: 'Go to Concordance', key: 'C', action: () => switchTab(3) },
-    { name: 'Go to Gene Search', key: '/', action: () => switchTab(5) },
-    { name: 'Go to Volcano', key: 'V', action: () => switchTab(6) },
-    { name: 'Go to Heatmap', key: null, action: () => switchTab(7) },
-    { name: 'Go to FC vs FC', key: null, action: () => switchTab(8) },
-    { name: 'Go to Export', key: null, action: () => switchTab(11) },
-    { name: 'Clear gene highlights', key: null, action: () => { showToast('Highlights cleared'); } },
-    { name: 'Toggle dark mode', key: 'Ctrl+L', action: () => { showToast('Dark mode toggled'); } },
-];
-
-function createCommandPalette() {
-    let overlay = doc.getElementById('cmd-overlay');
-    if (!overlay) {
-        overlay = doc.createElement('div');
-        overlay.id = 'cmd-overlay';
-        overlay.className = 'command-palette-overlay';
-        overlay.onclick = closeCommandPalette;
-        doc.body.appendChild(overlay);
-    }
-
-    let modal = doc.getElementById('cmd-modal');
-    if (!modal) {
-        modal = doc.createElement('div');
-        modal.id = 'cmd-modal';
-        modal.className = 'command-palette-modal';
-        modal.innerHTML = `
-            <input type="text" class="command-palette-input"
-                   placeholder="Type a command..." id="cmd-input">
-            <div class="command-list" id="cmd-list"></div>
-        `;
-        doc.body.appendChild(modal);
-
-        const input = modal.querySelector('#cmd-input');
-        input.addEventListener('input', filterCommandPalette);
-        input.addEventListener('keydown', handleCommandInput);
-    }
-
-    return { overlay, modal };
-}
-
-function openCommandPalette() {
-    const { overlay, modal } = createCommandPalette();
-    overlay.style.display = 'block';
-    modal.style.display = 'block';
-    const input = modal.querySelector('#cmd-input');
-    input.focus();
-    input.value = '';
-    selectedCommandIndex = 0;
-    filteredCommands = commands;
-    renderCommands();
-    commandPaletteOpen = true;
-}
-
-function closeCommandPalette() {
-    const overlay = doc.getElementById('cmd-overlay');
-    const modal = doc.getElementById('cmd-modal');
-    if (overlay) overlay.style.display = 'none';
-    if (modal) modal.style.display = 'none';
-    commandPaletteOpen = false;
-}
-
-function renderCommands() {
-    const list = doc.getElementById('cmd-list');
-    if (!list) return;
-
-    list.innerHTML = filteredCommands.map((cmd, i) => `
-        <div class="command-item ${i === selectedCommandIndex ? 'selected' : ''}"
-             data-index="${i}">
-            <span class="command-name">${cmd.name}</span>
-            ${cmd.key ? `<span class="command-key">${cmd.key}</span>` : ''}
-        </div>
-    `).join('');
-
-    list.querySelectorAll('.command-item').forEach(item => {
-        item.onclick = () => executeCommand(parseInt(item.dataset.index));
-    });
-}
-
-function filterCommandPalette(e) {
-    const query = e.target.value.toLowerCase();
-    filteredCommands = commands.filter(c => c.name.toLowerCase().includes(query));
-    selectedCommandIndex = 0;
-    renderCommands();
-}
-
-function handleCommandInput(e) {
-    const list = doc.getElementById('cmd-list');
-    if (!list) return;
-
-    const items = list.querySelectorAll('.command-item');
-
-    if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        selectedCommandIndex = Math.min(selectedCommandIndex + 1, items.length - 1);
-        renderCommands();
-    } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        selectedCommandIndex = Math.max(selectedCommandIndex - 1, 0);
-        renderCommands();
-    } else if (e.key === 'Enter') {
-        e.preventDefault();
-        executeCommand(selectedCommandIndex);
-    } else if (e.key === 'Escape') {
-        e.preventDefault();
-        closeCommandPalette();
-    }
-}
-
-function executeCommand(index) {
-    if (index < 0 || index >= filteredCommands.length) return;
-
-    const cmd = filteredCommands[index];
-    closeCommandPalette();
-    cmd.action();
-    showToast(cmd.name);
-}
-
-// Update handleKey to include Ctrl+K
-const originalHandleKey = handleKey;
-handleKey = function(e) {
-    // Ctrl+K or Cmd+K for command palette
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        if (commandPaletteOpen) {
-            closeCommandPalette();
-        } else {
-            openCommandPalette();
-        }
-        return;
-    }
-
-    // Escape to close command palette
-    if (e.key === 'Escape' && commandPaletteOpen) {
-        e.preventDefault();
-        closeCommandPalette();
-        return;
-    }
-
-    // Call original handler
-    if (!commandPaletteOpen) {
-        originalHandleKey(e);
-    }
-};
-
-// Remove existing listeners to prevent duplicates (if any)
-doc.removeEventListener('keydown', handleKey);
-frameDoc.removeEventListener('keydown', handleKey);
-
-// Add listeners
-doc.addEventListener('keydown', handleKey);
-frameDoc.addEventListener('keydown', handleKey);
-
-console.log("Global shortcut listener attached!");
-console.log("Command palette ready! Press Ctrl+K to open.");
-</script>
 """, unsafe_allow_html=True)
+
+# NOTE: Keyboard shortcuts are now injected at the END of main() function
+# so they run after tabs are rendered in the DOM
 
 # Initialize session state
 if 'datasets' not in st.session_state:
@@ -3858,6 +3600,296 @@ def export_tab(log2fc_threshold: float, pvalue_threshold: float):
                     st.error(f"Error generating publication figure: {str(e)}")
             else:
                 st.warning("Please select at least one panel to include.")
+
+    # ========================================================================
+    # INJECT WORKING KEYBOARD SHORTCUTS
+    # ========================================================================
+    # This MUST be at the end of main() so tabs exist in DOM
+    st.components.v1.html("""
+    <script>
+    (function() {
+        const parentDoc = window.parent.document;
+
+        console.log("🎹 Initializing keyboard shortcuts...");
+
+        // Wait for Streamlit to finish rendering
+        setTimeout(function() {
+
+            function getTabs() {
+                return parentDoc.querySelectorAll('button[data-baseweb="tab"]');
+            }
+
+            function switchToTab(index) {
+                const tabs = getTabs();
+                if (index >= 0 && index < tabs.length) {
+                    tabs[index].click();
+                    showToast(`Switched to ${tabs[index].textContent}`);
+                    console.log(`Switched to tab ${index}: ${tabs[index].textContent}`);
+                }
+            }
+
+            function showToast(message) {
+                let toast = parentDoc.getElementById('kbd-toast');
+                if (!toast) {
+                    toast = parentDoc.createElement('div');
+                    toast.id = 'kbd-toast';
+                    toast.style.cssText = `
+                        position: fixed;
+                        bottom: 20px;
+                        right: 20px;
+                        background: rgba(0,0,0,0.85);
+                        color: white;
+                        padding: 12px 20px;
+                        border-radius: 6px;
+                        z-index: 999999;
+                        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+                        font-size: 14px;
+                        font-weight: 500;
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                        transition: opacity 0.3s ease;
+                        opacity: 0;
+                    `;
+                    parentDoc.body.appendChild(toast);
+                }
+                toast.textContent = message;
+                toast.style.opacity = '1';
+                setTimeout(() => { toast.style.opacity = '0'; }, 1500);
+            }
+
+            // Command Palette
+            let paletteOpen = false;
+            let selectedIdx = 0;
+            let filteredCmds = [];
+
+            const commands = [
+                { name: '📁 Data Import', idx: 0 },
+                { name: '📊 Dashboard', idx: 1, key: 'D' },
+                { name: '🔗 UpSet', idx: 2, key: 'U' },
+                { name: '🔄 Concordance', idx: 3, key: 'C' },
+                { name: '📋 Report', idx: 4, key: 'R' },
+                { name: '🔍 Gene Search', idx: 5, key: 'G' },
+                { name: '🌋 Volcano', idx: 6, key: 'V' },
+                { name: '🗺️ Heatmap', idx: 7, key: 'H' },
+                { name: '📈 FC vs FC', idx: 8, key: 'F' },
+                { name: '🧮 Batch Compare', idx: 9, key: 'B' },
+                { name: '🛤️ Pathways', idx: 10, key: 'P' },
+                { name: '💾 Export', idx: 11, key: 'E' }
+            ];
+
+            function createPalette() {
+                if (parentDoc.getElementById('cmd-palette')) return;
+
+                const overlay = parentDoc.createElement('div');
+                overlay.id = 'cmd-palette';
+                overlay.style.cssText = `
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    background: rgba(0,0,0,0.6);
+                    z-index: 999998;
+                    display: none;
+                `;
+                overlay.onclick = closePalette;
+
+                const modal = parentDoc.createElement('div');
+                modal.id = 'cmd-modal';
+                modal.style.cssText = `
+                    position: fixed;
+                    top: 15%;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    background: white;
+                    border-radius: 12px;
+                    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+                    z-index: 999999;
+                    width: 600px;
+                    max-width: 90vw;
+                    max-height: 70vh;
+                    overflow: hidden;
+                    display: none;
+                `;
+                modal.onclick = (e) => e.stopPropagation();
+
+                modal.innerHTML = `
+                    <input type="text" id="cmd-input" placeholder="Type a command or tab name..."
+                        style="width: 100%; padding: 20px; font-size: 18px; border: none;
+                               border-bottom: 2px solid #eee; outline: none; box-sizing: border-box;">
+                    <div id="cmd-list" style="max-height: 400px; overflow-y: auto;"></div>
+                `;
+
+                parentDoc.body.appendChild(overlay);
+                parentDoc.body.appendChild(modal);
+
+                const input = modal.querySelector('#cmd-input');
+                input.addEventListener('input', filterPalette);
+                input.addEventListener('keydown', handlePaletteKeys);
+            }
+
+            function openPalette() {
+                createPalette();
+                const overlay = parentDoc.getElementById('cmd-palette');
+                const modal = parentDoc.getElementById('cmd-modal');
+                const input = parentDoc.getElementById('cmd-input');
+
+                overlay.style.display = 'block';
+                modal.style.display = 'block';
+                input.value = '';
+                input.focus();
+
+                selectedIdx = 0;
+                filteredCmds = commands;
+                renderPalette();
+                paletteOpen = true;
+            }
+
+            function closePalette() {
+                const overlay = parentDoc.getElementById('cmd-palette');
+                const modal = parentDoc.getElementById('cmd-modal');
+                if (overlay) overlay.style.display = 'none';
+                if (modal) modal.style.display = 'none';
+                paletteOpen = false;
+            }
+
+            function renderPalette() {
+                const list = parentDoc.getElementById('cmd-list');
+                if (!list) return;
+
+                list.innerHTML = filteredCmds.map((cmd, i) => `
+                    <div class="cmd-item" data-index="${i}"
+                         style="padding: 14px 20px; cursor: pointer; display: flex;
+                                justify-content: space-between; align-items: center;
+                                background: ${i === selectedIdx ? '#f5f5f5' : 'white'};
+                                transition: background 0.1s;">
+                        <span style="font-size: 15px; color: #333;">${cmd.name}</span>
+                        ${cmd.key ? `<kbd style="padding: 3px 8px; background: #eee;
+                                                   border-radius: 4px; font-size: 12px;
+                                                   color: #666;">${cmd.key}</kbd>` : ''}
+                    </div>
+                `).join('');
+
+                list.querySelectorAll('.cmd-item').forEach((item, i) => {
+                    item.onmouseenter = () => { selectedIdx = i; renderPalette(); };
+                    item.onclick = () => executeCmd(i);
+                });
+            }
+
+            function filterPalette(e) {
+                const query = e.target.value.toLowerCase();
+                filteredCmds = commands.filter(c =>
+                    c.name.toLowerCase().includes(query)
+                );
+                selectedIdx = 0;
+                renderPalette();
+            }
+
+            function handlePaletteKeys(e) {
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    selectedIdx = Math.min(selectedIdx + 1, filteredCmds.length - 1);
+                    renderPalette();
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    selectedIdx = Math.max(selectedIdx - 1, 0);
+                    renderPalette();
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    executeCmd(selectedIdx);
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closePalette();
+                }
+            }
+
+            function executeCmd(index) {
+                if (index < 0 || index >= filteredCmds.length) return;
+                const cmd = filteredCmds[index];
+                closePalette();
+                switchToTab(cmd.idx);
+            }
+
+            // Main keyboard handler
+            function handleKeyPress(e) {
+                // Ignore if typing in input/textarea
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                    return;
+                }
+
+                const key = e.key.toLowerCase();
+
+                // Ctrl+K or Cmd+K for command palette
+                if ((e.ctrlKey || e.metaKey) && key === 'k') {
+                    e.preventDefault();
+                    if (paletteOpen) {
+                        closePalette();
+                    } else {
+                        openPalette();
+                    }
+                    return;
+                }
+
+                // Escape closes palette
+                if (key === 'escape' && paletteOpen) {
+                    e.preventDefault();
+                    closePalette();
+                    return;
+                }
+
+                // Don't process other shortcuts if palette is open
+                if (paletteOpen) return;
+
+                // Number keys 1-9
+                if (key >= '1' && key <= '9') {
+                    e.preventDefault();
+                    switchToTab(parseInt(key) - 1);
+                }
+                // Letter shortcuts
+                else if (key === 'd') { e.preventDefault(); switchToTab(1); }  // Dashboard
+                else if (key === 'u') { e.preventDefault(); switchToTab(2); }  // UpSet
+                else if (key === 'c') { e.preventDefault(); switchToTab(3); }  // Concordance
+                else if (key === 'r') { e.preventDefault(); switchToTab(4); }  // Report
+                else if (key === 'g') { e.preventDefault(); switchToTab(5); }  // Gene Search
+                else if (key === 'v') { e.preventDefault(); switchToTab(6); }  // Volcano
+                else if (key === 'h') { e.preventDefault(); switchToTab(7); }  // Heatmap
+                else if (key === 'f') { e.preventDefault(); switchToTab(8); }  // FC vs FC
+                else if (key === 'b') { e.preventDefault(); switchToTab(9); }  // Batch
+                else if (key === 'p') { e.preventDefault(); switchToTab(10); } // Pathways
+                else if (key === 'e') { e.preventDefault(); switchToTab(11); } // Export
+                else if (key === '/') {
+                    e.preventDefault();
+                    switchToTab(5); // Gene Search
+                    // Try to focus search input after a brief delay
+                    setTimeout(() => {
+                        const inputs = parentDoc.querySelectorAll('input');
+                        for (let input of inputs) {
+                            if (input.placeholder && input.placeholder.toLowerCase().includes('gene')) {
+                                input.focus();
+                                break;
+                            }
+                        }
+                    }, 100);
+                }
+                else if (key === '?') {
+                    e.preventDefault();
+                    showToast('Press Ctrl+K for commands');
+                }
+            }
+
+            // Remove existing listeners
+            parentDoc.removeEventListener('keydown', handleKeyPress);
+            // Add listener
+            parentDoc.addEventListener('keydown', handleKeyPress);
+
+            console.log("✅ Keyboard shortcuts active!");
+            console.log("📍 Tabs found:", getTabs().length);
+            showToast("⌨️ Keyboard shortcuts ready! Press Ctrl+K");
+
+        }, 500); // Wait 500ms for Streamlit to finish rendering
+
+    })();
+    </script>
+    """, height=0)
 
 
 if __name__ == "__main__":
