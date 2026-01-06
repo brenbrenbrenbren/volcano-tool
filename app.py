@@ -603,6 +603,42 @@ def main():
 
         st.markdown("---")
 
+        # Default Excel File Auto-Load
+        st.markdown("### ⚙️ Settings")
+        with st.expander("📂 Default Excel File", expanded=False):
+            st.caption("Set a default Excel file to automatically load on startup")
+
+            default_file_path = st.text_input(
+                "File path",
+                value=st.session_state.get('default_excel_path', ''),
+                placeholder="/path/to/your/data.xlsx",
+                help="Enter the full path to your Excel file",
+                key="default_excel_path_input"
+            )
+
+            col_save, col_clear, col_load = st.columns(3)
+            with col_save:
+                if st.button("💾 Save", use_container_width=True):
+                    st.session_state.default_excel_path = default_file_path
+                    st.success("Default file saved!")
+
+            with col_clear:
+                if st.button("🗑️ Clear", use_container_width=True):
+                    st.session_state.default_excel_path = ''
+                    st.info("Default file cleared")
+
+            with col_load:
+                if st.button("📂 Load Now", use_container_width=True) and default_file_path:
+                    from pathlib import Path
+                    if Path(default_file_path).exists():
+                        st.session_state.trigger_auto_load = True
+                        st.success(f"Loading {Path(default_file_path).name}...")
+                        st.rerun()
+                    else:
+                        st.error("File not found!")
+
+        st.markdown("---")
+
         # Dataset summary
         if st.session_state.datasets:
             st.markdown("### Loaded Datasets")
@@ -870,6 +906,38 @@ def data_import_tab(log2fc_threshold: float, pvalue_threshold: float):
         st.session_state.all_available_sheets = []  # [(filename, sheetname), ...]
     if 'selected_sheet_keys' not in st.session_state:
         st.session_state.selected_sheet_keys = set()
+
+    # Auto-load default Excel file on startup
+    if st.session_state.get('trigger_auto_load', False) or \
+       (st.session_state.get('default_excel_path', '') and \
+        not st.session_state.uploaded_files_data and \
+        'auto_load_attempted' not in st.session_state):
+
+        default_path = st.session_state.get('default_excel_path', '')
+        if default_path and Path(default_path).exists():
+            try:
+                with st.spinner(f"Auto-loading {Path(default_path).name}..."):
+                    excel_file = pd.ExcelFile(default_path)
+                    filename = Path(default_path).name
+                    sheet_names = excel_file.sheet_names
+
+                    st.session_state.uploaded_files_data[filename] = {
+                        'excel_file': excel_file,
+                        'sheets': sheet_names,
+                        'dataframes': {}
+                    }
+
+                    # Select all sheets by default
+                    all_sheets = [(filename, sheet) for sheet in sheet_names]
+                    st.session_state.all_available_sheets = all_sheets
+                    st.session_state.selected_sheet_keys = {f"{filename}::{sn}" for _, sn in all_sheets}
+
+                    st.success(f"✅ Auto-loaded {filename} with {len(sheet_names)} sheets")
+            except Exception as e:
+                st.error(f"Failed to auto-load default file: {str(e)}")
+
+        st.session_state.auto_load_attempted = True
+        st.session_state.trigger_auto_load = False
 
     col1, col2 = st.columns([1, 1])
 
@@ -2558,7 +2626,7 @@ def create_gene_barplot_cached(
     dark_mode: bool
 ):
     """
-    Cached version of barplot generation.
+    Cached version of barplot generation with O(1) gene index lookups.
 
     Caching prevents re-rendering the same plot multiple times.
     The datasets_hash parameter ensures cache invalidation when data changes.
@@ -2569,7 +2637,8 @@ def create_gene_barplot_cached(
         log2fc_threshold=log2fc_threshold,
         pvalue_threshold=pvalue_threshold,
         use_padj=use_padj,
-        dark_mode=dark_mode
+        dark_mode=dark_mode,
+        gene_index=st.session_state.gene_index  # Pass gene_index for O(1) lookups
     )
 
 
@@ -2836,45 +2905,65 @@ def gene_search_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: 
                             st.markdown(f"[GeneCards](https://www.genecards.org/cgi-bin/carddisp.pl?gene={gene_name})")
                             st.markdown(f"[PubMed](https://pubmed.ncbi.nlm.nih.gov/?term={gene_name})")
 
-                # Gene Relationship Hints
+                # Gene Relationship Hints - LAZY LOADING (only compute when user clicks)
                 if len(st.session_state.datasets) >= 3:
-                    with st.expander(f"🔗 Related Genes for {gene_name}"):
-                        analyzer = GeneRelationshipAnalyzer(st.session_state.datasets)
+                    # Check if we already computed relationships for this gene
+                    rel_cache_key = f'gene_relationships_{gene_name}_{datasets_hash}'
 
-                        # Find correlated genes
-                        correlated = analyzer.find_correlated_genes(
-                            gene_name,
-                            min_datasets=min(3, len(st.session_state.datasets)),
-                            min_correlation=0.7
-                        )
-
-                        if correlated:
-                            st.markdown(f"**Genes showing similar expression patterns:**")
-                            st.caption("(These genes might share regulatory mechanisms with " + gene_name + ")")
-
-                            # Show top 5
-                            for rel in correlated[:5]:
-                                direction_icon = "↗️" if rel['direction'] == 'same' else "↘️"
-                                st.markdown(
-                                    f"{direction_icon} **{rel['gene']}** - "
-                                    f"correlation: {rel['correlation']:.2f} "
-                                    f"({rel['n_datasets']} datasets, p={rel['pvalue']:.3f})"
+                    # Button to trigger computation
+                    if rel_cache_key not in st.session_state:
+                        if st.button(f"🔗 Find Related Genes for {gene_name}", key=f"find_rel_{gene_name}"):
+                            with st.spinner(f"Analyzing gene relationships for {gene_name}..."):
+                                analyzer = GeneRelationshipAnalyzer(st.session_state.datasets)
+                                correlated = analyzer.find_correlated_genes(
+                                    gene_name,
+                                    min_datasets=min(3, len(st.session_state.datasets)),
+                                    min_correlation=0.7
                                 )
+                                st.session_state[rel_cache_key] = correlated
+                                st.rerun()
+                    else:
+                        # Display cached results in an expander
+                        with st.expander(f"🔗 Related Genes for {gene_name}", expanded=True):
+                            correlated = st.session_state[rel_cache_key]
 
-                                # Quick context
-                                context = st.session_state.gene_info_fetcher.get_quick_context(rel['gene'])
-                                if context and context != rel['gene']:
-                                    st.caption(f"   {context}")
+                            if correlated:
+                                st.markdown(f"**Genes showing similar expression patterns:**")
+                                st.caption("(These genes might share regulatory mechanisms with " + gene_name + ")")
 
-                            # Hypothesis suggestion
-                            if len(correlated) > 0:
-                                st.info(
-                                    f"💭 **Hypothesis:** {gene_name} and {correlated[0]['gene']} "
-                                    f"show {'co-regulation' if correlated[0]['direction'] == 'same' else 'opposing regulation'}. "
-                                    f"They might be part of the same pathway or regulatory network."
-                                )
-                        else:
-                            st.caption(f"No strongly correlated genes found for {gene_name}")
+                                # Show top 5
+                                for rel in correlated[:5]:
+                                    direction_icon = "↗️" if rel['direction'] == 'same' else "↘️"
+                                    st.markdown(
+                                        f"{direction_icon} **{rel['gene']}** - "
+                                        f"correlation: {rel['correlation']:.2f} "
+                                        f"({rel['n_datasets']} datasets, p={rel['pvalue']:.3f})"
+                                    )
+
+                                    # Quick context
+                                    context = st.session_state.gene_info_fetcher.get_quick_context(rel['gene'])
+                                    if context and context != rel['gene']:
+                                        st.caption(f"   {context}")
+
+                                # Hypothesis suggestion
+                                if len(correlated) > 0:
+                                    st.info(
+                                        f"💭 **Hypothesis:** {gene_name} and {correlated[0]['gene']} "
+                                        f"show {'co-regulation' if correlated[0]['direction'] == 'same' else 'opposing regulation'}. "
+                                        f"They might be part of the same pathway or regulatory network."
+                                    )
+
+                                # Button to recompute
+                                if st.button("🔄 Recompute", key=f"recomp_rel_{gene_name}"):
+                                    del st.session_state[rel_cache_key]
+                                    st.rerun()
+                            else:
+                                st.caption(f"No strongly correlated genes found for {gene_name}")
+
+                                # Button to hide
+                                if st.button("❌ Hide", key=f"hide_rel_{gene_name}"):
+                                    del st.session_state[rel_cache_key]
+                                    st.rerun()
 
                 # Detail table (using cached function)
                 presence = get_gene_presence_cached(
@@ -3873,6 +3962,19 @@ def export_tab(log2fc_threshold: float, pvalue_threshold: float):
                 else if (key === '?') {
                     e.preventDefault();
                     showToast('Press Ctrl+K for commands');
+                }
+                // Shift+R to click Process/Run button
+                else if (e.shiftKey && key === 'r') {
+                    e.preventDefault();
+                    // Find the Process button (it has "Process" in its text)
+                    const buttons = parentDoc.querySelectorAll('button');
+                    for (let btn of buttons) {
+                        if (btn.textContent && btn.textContent.includes('Process') && btn.textContent.includes('Dataset')) {
+                            btn.click();
+                            showToast('🚀 Processing datasets...');
+                            break;
+                        }
+                    }
                 }
             }
 

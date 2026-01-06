@@ -14,7 +14,8 @@ def create_gene_barplot(
     log2fc_threshold: float = 1.0,
     pvalue_threshold: float = 0.05,
     use_padj: bool = True,
-    dark_mode: bool = False
+    dark_mode: bool = False,
+    gene_index: Dict[str, Dict[str, int]] = None
 ) -> go.Figure:
     """
     Create a bar plot showing a single gene's log2FC across all datasets.
@@ -26,6 +27,7 @@ def create_gene_barplot(
         pvalue_threshold: P-value threshold for significance
         use_padj: Use adjusted p-value
         dark_mode: Use dark theme
+        gene_index: Optional gene index for O(1) lookups
 
     Returns:
         Plotly Figure object
@@ -35,13 +37,13 @@ def create_gene_barplot(
     # Collect data
     data = []
     for name, df in datasets.items():
-        gene_row = df[df['Gene'].str.upper() == gene_name_upper]
-
-        if len(gene_row) > 0:
-            row = gene_row.iloc[0]
+        # Use gene_index for O(1) lookup if available
+        if gene_index and gene_name_upper in gene_index and name in gene_index[gene_name_upper]:
+            # O(1) lookup using index
+            row_idx = gene_index[gene_name_upper][name]
+            row = df.iloc[row_idx]
             log2fc = row['log2FC']
             pval = row.get('padj' if use_padj else 'pvalue', row.get('pvalue', 1))
-
             is_sig = abs(log2fc) >= log2fc_threshold and pval <= pvalue_threshold
 
             data.append({
@@ -52,13 +54,31 @@ def create_gene_barplot(
                 'Direction': 'Up' if log2fc > 0 else 'Down' if log2fc < 0 else 'None'
             })
         else:
-            data.append({
-                'Dataset': name,
-                'log2FC': 0,
-                'pvalue': 1,
-                'Significant': False,
-                'Direction': 'None'
-            })
+            # Fallback: O(n) scan if index not available
+            gene_row = df[df['Gene'].str.upper() == gene_name_upper]
+
+            if len(gene_row) > 0:
+                row = gene_row.iloc[0]
+                log2fc = row['log2FC']
+                pval = row.get('padj' if use_padj else 'pvalue', row.get('pvalue', 1))
+                is_sig = abs(log2fc) >= log2fc_threshold and pval <= pvalue_threshold
+
+                data.append({
+                    'Dataset': name,
+                    'log2FC': log2fc,
+                    'pvalue': pval,
+                    'Significant': is_sig,
+                    'Direction': 'Up' if log2fc > 0 else 'Down' if log2fc < 0 else 'None'
+                })
+            else:
+                # Gene not found in this dataset
+                data.append({
+                    'Dataset': name,
+                    'log2FC': 0,
+                    'pvalue': 1,
+                    'Significant': False,
+                    'Direction': 'None'
+                })
 
     df_plot = pd.DataFrame(data)
 
