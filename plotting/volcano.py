@@ -5,7 +5,7 @@ Volcano plot visualization.
 import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict
 
 
 def create_volcano_plot(
@@ -17,7 +17,8 @@ def create_volcano_plot(
     highlight_genes: Optional[List[str]] = None,
     dark_mode: bool = False,
     show_labels: bool = True,
-    top_n_labels: int = 10
+    top_n_labels: int = 10,
+    gene_index: Optional[Dict[str, int]] = None
 ) -> go.Figure:
     """
     Create an interactive volcano plot.
@@ -32,6 +33,7 @@ def create_volcano_plot(
         dark_mode: Use dark theme
         show_labels: Show gene labels for top genes
         top_n_labels: Number of top genes to label
+        gene_index: Optional dict of {gene_upper: row_index} for O(1) gene lookups
 
     Returns:
         Plotly Figure object
@@ -101,7 +103,23 @@ def create_volcano_plot(
 
     # Highlight specific genes if provided
     if highlight_genes:
-        highlight_df = df[df['Gene'].str.upper().isin([g.upper() for g in highlight_genes])]
+        # Use gene_index for O(1) lookups if available; otherwise fallback to O(n) scan
+        if gene_index:
+            # O(1) lookups using pre-built index
+            highlight_indices = []
+            for gene in highlight_genes:
+                gene_upper = gene.upper().strip()
+                if gene_upper in gene_index:
+                    highlight_indices.append(gene_index[gene_upper])
+
+            if highlight_indices:
+                highlight_df = df.iloc[highlight_indices].copy()
+            else:
+                highlight_df = pd.DataFrame()
+        else:
+            # Fallback: O(n) scan if index not available
+            highlight_df = df[df['Gene'].str.upper().isin([g.upper() for g in highlight_genes])]
+
         if len(highlight_df) > 0:
             fig.add_trace(go.Scatter(
                 x=highlight_df['log2FC'],

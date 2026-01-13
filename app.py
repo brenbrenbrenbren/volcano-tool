@@ -2112,6 +2112,12 @@ def volcano_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: bool
                 (highlight_genes or []) + st.session_state.global_highlighted_genes
             ))
 
+            # Build gene_index for the current dataset (O(1) lookups in volcano plot)
+            dataset_gene_index = {}
+            for idx, gene in enumerate(df['Gene'].values):
+                gene_upper = str(gene).upper()
+                dataset_gene_index[gene_upper] = idx
+
             fig = create_volcano_plot(
                 df,
                 title=selected_dataset,
@@ -2121,7 +2127,8 @@ def volcano_tab(log2fc_threshold: float, pvalue_threshold: float, use_padj: bool
                 highlight_genes=combined_highlights if combined_highlights else None,
                 dark_mode=st.session_state.dark_mode,
                 show_labels=show_labels,
-                top_n_labels=top_n
+                top_n_labels=top_n,
+                gene_index=dataset_gene_index
             )
 
             st.plotly_chart(fig, use_container_width=True)
@@ -3026,7 +3033,8 @@ def pathway_tab(log2fc_threshold: float, pvalue_threshold: float):
                 pvalue_threshold=pvalue_threshold,
                 dark_mode=st.session_state.dark_mode,
                 show_all_genes=show_all,
-                max_genes=max_genes
+                max_genes=max_genes,
+                gene_index=st.session_state.gene_index
             )
 
             st.plotly_chart(fig, use_container_width=True)
@@ -3576,6 +3584,13 @@ def export_tab(log2fc_threshold: float, pvalue_threshold: float):
             if include_volcano and selected_for_volcano:
                 try:
                     df_volcano = st.session_state.datasets[selected_for_volcano]
+
+                    # Build gene_index for the current dataset (O(1) lookups in volcano plot)
+                    volcano_gene_index = {}
+                    for idx, gene in enumerate(df_volcano['Gene'].values):
+                        gene_upper = str(gene).upper()
+                        volcano_gene_index[gene_upper] = idx
+
                     fig_volcano = create_volcano_plot(
                         df_volcano,
                         title=selected_for_volcano,
@@ -3584,7 +3599,8 @@ def export_tab(log2fc_threshold: float, pvalue_threshold: float):
                         use_padj=True,
                         dark_mode=False,  # Always use light mode for publication
                         show_labels=True,
-                        top_n_labels=10
+                        top_n_labels=10,
+                        gene_index=volcano_gene_index
                     )
                     panels.append({
                         'figure': fig_volcano,

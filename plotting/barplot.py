@@ -178,7 +178,8 @@ def create_pathway_barplot(
     pvalue_threshold: float = 0.05,
     dark_mode: bool = False,
     show_all_genes: bool = False,
-    max_genes: int = 30
+    max_genes: int = 30,
+    gene_index: Optional[Dict[str, Dict[str, int]]] = None
 ) -> go.Figure:
     """
     Create a grouped bar plot for pathway genes across datasets.
@@ -192,6 +193,7 @@ def create_pathway_barplot(
         dark_mode: Use dark theme
         show_all_genes: Show all genes or only significant ones
         max_genes: Maximum genes to display
+        gene_index: Optional dict of {gene_upper: {dataset_name: row_index}} for O(1) lookups
 
     Returns:
         Plotly Figure object
@@ -201,23 +203,44 @@ def create_pathway_barplot(
     # Collect data for all pathway genes across datasets
     all_data = []
 
-    for gene in pathway_genes_upper:
-        for name, df in datasets.items():
-            gene_row = df[df['Gene'].str.upper() == gene]
+    if gene_index:
+        # O(1) lookups using pre-built index
+        for gene in pathway_genes_upper:
+            if gene in gene_index:
+                for name, row_idx in gene_index[gene].items():
+                    if name in datasets:
+                        df = datasets[name]
+                        row = df.iloc[row_idx]
+                        log2fc = row['log2FC']
+                        pval = row.get('padj', row.get('pvalue', 1))
+                        is_sig = abs(log2fc) >= log2fc_threshold and pval <= pvalue_threshold
 
-            if len(gene_row) > 0:
-                row = gene_row.iloc[0]
-                log2fc = row['log2FC']
-                pval = row.get('padj', row.get('pvalue', 1))
-                is_sig = abs(log2fc) >= log2fc_threshold and pval <= pvalue_threshold
+                        all_data.append({
+                            'Gene': row['Gene'],
+                            'Dataset': name,
+                            'log2FC': log2fc,
+                            'pvalue': pval,
+                            'Significant': is_sig
+                        })
+    else:
+        # Fallback: O(n) scans if index not available
+        for gene in pathway_genes_upper:
+            for name, df in datasets.items():
+                gene_row = df[df['Gene'].str.upper() == gene]
 
-                all_data.append({
-                    'Gene': row['Gene'],
-                    'Dataset': name,
-                    'log2FC': log2fc,
-                    'pvalue': pval,
-                    'Significant': is_sig
-                })
+                if len(gene_row) > 0:
+                    row = gene_row.iloc[0]
+                    log2fc = row['log2FC']
+                    pval = row.get('padj', row.get('pvalue', 1))
+                    is_sig = abs(log2fc) >= log2fc_threshold and pval <= pvalue_threshold
+
+                    all_data.append({
+                        'Gene': row['Gene'],
+                        'Dataset': name,
+                        'log2FC': log2fc,
+                        'pvalue': pval,
+                        'Significant': is_sig
+                    })
 
     if not all_data:
         return _empty_bar(f"No pathway genes found in datasets", dark_mode)

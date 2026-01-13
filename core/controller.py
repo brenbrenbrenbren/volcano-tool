@@ -154,8 +154,119 @@ def process_count_analysis(
         dataset_name = sheetname
         if filename:
             dataset_name = f"{Path(filename).stem}_{sheetname}"
-            
+
         return dataset_name, result, None
 
     except Exception as e:
         return sheetname, None, str(e)
+
+# Cached volcano plot functions
+@st.cache_data(show_spinner=False, ttl=600)
+def create_volcano_cached(
+    df_bytes: bytes,
+    df_hash: str,
+    title: str,
+    log2fc_threshold: float,
+    pvalue_threshold: float,
+    use_padj: bool,
+    dark_mode: bool,
+    show_labels: bool,
+    top_n_labels: int
+):
+    """
+    Create and cache a volcano plot from DataFrame bytes.
+    The df_bytes and df_hash are used for cache invalidation.
+
+    Args:
+        df_bytes: Serialized dataframe for caching
+        df_hash: Hash of dataframe for cache key
+        title: Plot title
+        log2fc_threshold: Fold change threshold
+        pvalue_threshold: P-value threshold
+        use_padj: Use adjusted p-values
+        dark_mode: Dark theme
+        show_labels: Show gene labels
+        top_n_labels: Number of top labels
+
+    Returns:
+        Plotly Figure object
+    """
+    import pickle
+    from plotting.volcano import create_volcano_plot
+
+    # Reconstruct dataframe from bytes
+    df = pickle.loads(df_bytes)
+
+    # Create volcano plot
+    fig = create_volcano_plot(
+        df,
+        title=title,
+        log2fc_threshold=log2fc_threshold,
+        pvalue_threshold=pvalue_threshold,
+        use_padj=use_padj,
+        dark_mode=dark_mode,
+        show_labels=show_labels,
+        top_n_labels=top_n_labels
+    )
+
+    return fig
+
+@st.cache_data(show_spinner=False, ttl=600)
+def create_volcano_with_highlights_cached(
+    df_bytes: bytes,
+    df_hash: str,
+    gene_index_hash: str,
+    title: str,
+    log2fc_threshold: float,
+    pvalue_threshold: float,
+    use_padj: bool,
+    highlight_genes_tuple: Tuple,
+    dark_mode: bool,
+    show_labels: bool,
+    top_n_labels: int,
+    gene_index_json: str
+):
+    """
+    Create and cache a volcano plot with highlighted genes.
+    Optimized with gene_index for O(1) highlighting.
+
+    Args:
+        df_bytes: Serialized dataframe for caching
+        df_hash: Hash of dataframe for cache key
+        gene_index_hash: Hash of gene index for cache key
+        title: Plot title
+        log2fc_threshold: Fold change threshold
+        pvalue_threshold: P-value threshold
+        use_padj: Use adjusted p-values
+        highlight_genes_tuple: Tuple of genes to highlight
+        dark_mode: Dark theme
+        show_labels: Show gene labels
+        top_n_labels: Number of top labels
+        gene_index_json: JSON string of gene index for reconstruction
+
+    Returns:
+        Plotly Figure object
+    """
+    import pickle
+    import json
+    from plotting.volcano import create_volcano_plot
+
+    # Reconstruct dataframe and gene_index
+    df = pickle.loads(df_bytes)
+    gene_index = json.loads(gene_index_json) if gene_index_json else None
+
+    # Create volcano plot with highlights (uses O(1) lookups if gene_index provided)
+    fig = create_volcano_plot(
+        df,
+        title=title,
+        log2fc_threshold=log2fc_threshold,
+        pvalue_threshold=pvalue_threshold,
+        use_padj=use_padj,
+        highlight_genes=list(highlight_genes_tuple) if highlight_genes_tuple else None,
+        dark_mode=dark_mode,
+        show_labels=show_labels,
+        top_n_labels=top_n_labels,
+        gene_index=gene_index
+    )
+
+    return fig
