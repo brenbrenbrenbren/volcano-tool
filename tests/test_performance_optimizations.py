@@ -37,8 +37,12 @@ def test_build_gene_index():
         })
     }
 
-    # Build index
-    gene_index = build_gene_index(datasets)
+    # Build index (returns tuple: gene_index, sorted_genes)
+    gene_index, sorted_genes = build_gene_index(datasets)
+
+    # Verify sorted_genes list
+    assert 'ANXA2' in sorted_genes
+    assert sorted_genes == sorted(sorted_genes)  # Should be pre-sorted
 
     # Verify index structure
     assert 'ANXA2' in gene_index
@@ -181,10 +185,14 @@ def test_gene_index_performance():
         })
     }
 
-    # Build index
+    # Build index (returns tuple: gene_index, sorted_genes)
     start = time.time()
-    gene_index = build_gene_index(datasets)
+    gene_index, sorted_genes = build_gene_index(datasets)
     index_time = time.time() - start
+
+    # Verify sorted_genes is pre-sorted
+    assert len(sorted_genes) == n_genes
+    assert sorted_genes == sorted(sorted_genes)
 
     # Test lookup using index (O(1))
     start = time.time()

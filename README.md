@@ -17,8 +17,9 @@ A comprehensive Streamlit application for visualizing and comparing differential
 
 ### ⌨️ Keyboard Shortcuts
 - **`/`** - Focus gene search
-- **`Ctrl+D`** - Toggle dark mode
+- **`Ctrl+L`** - Toggle dark mode
 - **`?`** - Show keyboard shortcuts help
+- **`Ctrl+K`** - Command palette
 - **Quick Presets** - One-click threshold adjustment (Stringent/Moderate/Lenient)
 
 ### 📊 Key Analysis Tabs
